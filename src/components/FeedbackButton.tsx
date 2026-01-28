@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 export function FeedbackButton() {
+    // Feedback Form State
     const [isOpen, setIsOpen] = useState(false);
     const [email, setEmail] = useState("");
     const [message, setMessage] = useState("");

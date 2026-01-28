@@ -40,6 +40,7 @@ interface CalculatorProps {
 }
 
 export default function Calculator({ locale }: CalculatorProps) {
+    // Calculator State Initialization
     const [inputs, setInputs] = useState<CalculatorInputs>({
         assetClass: 'crypto',
         balance: '',

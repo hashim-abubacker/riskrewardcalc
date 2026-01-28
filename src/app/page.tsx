@@ -61,6 +61,7 @@ export default function Home() {
       />
 
       <div className="min-h-screen py-4">
+        {/* Main Home Layout */}
         {/* Locale Selector & Feedback Button */}
         <div className="max-w-[1000px] mx-auto px-3 mb-4 flex justify-end gap-2">
           <FeedbackButton />

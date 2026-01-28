@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { FeedbackButton } from "./FeedbackButton";
 
+// Header component with mobile hamburger menu
 export function Header() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
 
