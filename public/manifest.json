@@ -1,0 +1,55 @@
+{
+    "name": "RiskRewardCalc - Smart Trading Calculator",
+    "short_name": "RiskRewardCalc",
+    "description": "A wallet-risk focused trading calculator for high-leverage Crypto and Forex traders. Calculate position size, margin, and risk:reward ratio based on your account balance.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#09090B",
+    "theme_color": "#10B981",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": [
+        "finance",
+        "productivity",
+        "utilities"
+    ],
+    "shortcuts": [
+        {
+            "name": "Calculator",
+            "short_name": "Calc",
+            "description": "Open the risk calculator",
+            "url": "/",
+            "icons": [
+                {
+                    "src": "/icon-192x192.png",
+                    "sizes": "192x192"
+                }
+            ]
+        },
+        {
+            "name": "Blog",
+            "short_name": "Blog",
+            "description": "Read trading insights",
+            "url": "/blog",
+            "icons": [
+                {
+                    "src": "/icon-192x192.png",
+                    "sizes": "192x192"
+                }
+            ]
+        }
+    ]
+}
