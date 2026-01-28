@@ -18,10 +18,42 @@ export const metadata: Metadata = {
   description: "Free Position Size Calculator for Crypto, Forex, and Stocks. Calculate exact lot sizes, stop loss levels, and leverage risk management in seconds.",
   keywords: ["position size calculator", "crypto profit calculator", "lot size calculator", "risk management", "trading calculator", "crypto trading", "forex calculator", "leverage calculator", "RRR calculator"],
   authors: [{ name: "RiskRewardCalc" }],
+  metadataBase: new URL('https://riskrewardcalc.com'),
+
   openGraph: {
     title: "Position Size Calculator & Crypto Profit Tool | RiskRewardCalc",
     description: "Calculate your position size based on wallet risk for crypto, forex, stocks, and futures trading.",
     type: "website",
+    url: 'https://riskrewardcalc.com',
+    siteName: 'RiskRewardCalc',
+    images: [
+      {
+        url: '/og-image.jpg',
+        width: 1200,
+        height: 630,
+        alt: 'RiskRewardCalc - Position Size Calculator',
+      },
+    ],
+    locale: 'en_US',
+  },
+
+  twitter: {
+    card: 'summary_large_image',
+    title: "Position Size Calculator & Crypto Profit Tool | RiskRewardCalc",
+    description: "Calculate your position size based on wallet risk for crypto, forex, stocks, and futures trading.",
+    images: ['/og-image.jpg'],
+  },
+
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
   },
 };
 
