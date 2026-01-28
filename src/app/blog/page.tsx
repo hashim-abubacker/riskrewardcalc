@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export const metadata = {
     title: "Blog - RiskRewardCalc",
     description: "Trading insights, risk management strategies, and updates from RiskRewardCalc.",

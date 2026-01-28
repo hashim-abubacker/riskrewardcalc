@@ -5,6 +5,10 @@ import { Metadata } from "next";
 import { generateArticleSchema, generateBreadcrumbSchema } from "@/lib/structured-data";
 import 'katex/dist/katex.min.css';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+
 interface BlogPostPageProps {
     params: Promise<{
         slug: string;
