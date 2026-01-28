@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { FeedbackButton } from "@/components/FeedbackButton";
+import { Header } from "@/components/Header";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -77,22 +77,7 @@ export default function RootLayout({
       >
         <div className="min-h-screen flex flex-col">
           {/* Header */}
-          <header className="border-b border-[#27272A] px-4 py-3">
-            <div className="max-w-7xl mx-auto flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-bold text-[#10B981]">Risk</span>
-                <span className="text-xl font-bold text-white">Reward</span>
-                <span className="text-xl font-bold text-[#3B82F6]">Calc</span>
-              </div>
-              {/* Placeholder for settings/language toggle */}
-              <nav className="flex items-center gap-4 text-sm text-[#A1A1AA]">
-                <a href="/" className="hover:text-white transition-colors">Calculator</a>
-                <a href="/blog" className="hover:text-white transition-colors">Blog</a>
-                <a href="/#faq" className="hover:text-white transition-colors">FAQ</a>
-                <FeedbackButton />
-              </nav>
-            </div>
-          </header>
+          <Header />
 
           {/* Main Content */}
           <main className="flex-1">

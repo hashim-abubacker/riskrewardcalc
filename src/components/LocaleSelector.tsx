@@ -27,7 +27,7 @@ export function LocaleSelector({ onLocaleChange }: LocaleSelectorProps) {
         <select
             value={locale}
             onChange={(e) => handleChange(e.target.value as SupportedLocale)}
-            className="bg-[#18181b] border border-[#27272A] rounded-lg px-3 py-1.5 text-sm text-white hover:border-[#10B981]/50 focus:outline-none focus:border-[#10B981] transition-colors"
+            className="bg-[#18181b] border border-[#27272A] rounded-lg px-2 py-1 text-xs text-white hover:border-[#10B981]/50 focus:outline-none focus:border-[#10B981] transition-colors"
         >
             {SUPPORTED_LOCALES.map((loc) => (
                 <option key={loc.code} value={loc.code}>

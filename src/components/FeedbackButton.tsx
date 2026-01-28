@@ -55,11 +55,15 @@ export function FeedbackButton() {
     return (
         <>
             {/* Feedback Button */}
+            {/* Feedback Button - Icon Style */}
             <button
                 onClick={() => setIsOpen(true)}
-                className="hover:text-white transition-colors"
+                className="p-1.5 text-gray-400 hover:text-emerald-500 hover:bg-[#27272A] rounded-lg transition-all"
+                title="Send Feedback"
             >
-                Feedback
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+                </svg>
             </button>
 
             {/* Modal */}
@@ -131,8 +135,8 @@ export function FeedbackButton() {
                             {/* Status Message */}
                             {status && (
                                 <div className={`text-sm p-3 rounded-lg ${status.type === 'success'
-                                        ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30'
-                                        : 'bg-red-500/10 text-red-500 border border-red-500/30'
+                                    ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30'
+                                    : 'bg-red-500/10 text-red-500 border border-red-500/30'
                                     }`}>
                                     {status.message}
                                 </div>

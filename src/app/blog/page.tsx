@@ -9,11 +9,19 @@ export const metadata = {
     description: "Trading insights, risk management strategies, and updates from RiskRewardCalc.",
 };
 
+import { Post } from "@prisma/client";
+
 export default async function BlogIndexPage() {
-    const posts = await prisma.post.findMany({
-        where: { published: true },
-        orderBy: { publishedAt: "desc" },
-    });
+    let posts: Post[] = [];
+    try {
+        posts = await prisma.post.findMany({
+            where: { published: true },
+            orderBy: { publishedAt: "desc" },
+        });
+    } catch (error) {
+        console.error("Failed to fetch blog posts:", error);
+        // Fallback to empty array to allow page to load even if DB is down
+    }
 
     return (
         <div className="min-h-screen bg-[#09090B]">

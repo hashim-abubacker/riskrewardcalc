@@ -260,8 +260,8 @@ export default function Calculator({ locale }: CalculatorProps) {
             {/* Two Column Layout - Fluid Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
 
-                {/* LEFT: Trade Setup Card */}
-                <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg md:rounded-xl overflow-hidden">
+                {/* LEFT: Trade Setup Card (Inputs) - Second on mobile, First on desktop */}
+                <div className="order-2 md:order-1 bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg md:rounded-xl overflow-hidden">
                     {/* Card Header */}
                     <div className="px-3 md:px-4 py-2 md:py-3 border-b border-[#2A2A2A] text-sm md:text-base font-semibold text-white">
                         Trade Setup
@@ -422,8 +422,8 @@ export default function Calculator({ locale }: CalculatorProps) {
                     </div>
                 </div>
 
-                {/* RIGHT: Results Card */}
-                <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg md:rounded-xl overflow-hidden">
+                {/* RIGHT: Results Card - First on mobile, Second on desktop */}
+                <div className="order-1 md:order-2 bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg md:rounded-xl overflow-hidden">
                     {/* Green Gradient Header */}
                     <div className="px-3 md:px-4 py-2 md:py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 text-sm md:text-base font-semibold text-white text-center">
                         Results & Analysis
