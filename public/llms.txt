@@ -1,0 +1,39 @@
+# RiskRewardCalc
+
+> A free position size and risk calculator for traders.
+
+## What is this?
+
+RiskRewardCalc is a trading calculator that helps Crypto, Forex, and Stock traders calculate their position size based on wallet risk. It focuses on capital preservation by calculating exact lot sizes while respecting your risk tolerance.
+
+## Features
+
+- Position Size Calculator
+- Risk:Reward Ratio Calculator
+- Support for Crypto, Stocks, Forex, and Futures
+- Leverage adjustment (1x-100x)
+- Instant calculations with no signup required
+
+## Asset Classes Supported
+
+- **Crypto**: Bitcoin, Ethereum, and all major pairs on Binance, Bybit, KuCoin
+- **Stocks**: US and Indian markets (Nifty, BankNifty)
+- **Forex**: All major currency pairs with standard lot calculations
+- **Futures**: F&O with customizable lot sizes
+
+## How it works
+
+1. Enter your Account Balance
+2. Set your Risk Percentage (e.g., 1%)
+3. Enter Entry Price and Stop Loss Price
+4. Optionally add Target Price for R:R ratio
+5. Adjust leverage if applicable
+6. Get your exact position size instantly
+
+## URL
+
+https://riskrewardcalc.com
+
+## Contact
+
+For feedback or questions, use the feedback button on the calculator.
