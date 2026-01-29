@@ -21,8 +21,8 @@ export function Header() {
                 {/* Desktop Navigation */}
                 <nav className="hidden md:flex items-center gap-6 text-sm text-[#A1A1AA]">
                     <Link href="/" className="hover:text-white transition-colors">Calculator</Link>
-                    <Link href="/blog" className="hover:text-white transition-colors">Blog</Link>
                     <Link href="/#faq" className="hover:text-white transition-colors">FAQ</Link>
+                    <FeedbackButton />
                 </nav>
 
                 {/* Mobile Menu Button */}
@@ -49,13 +49,6 @@ export function Header() {
                         Calculator
                     </Link>
                     <Link
-                        href="/blog"
-                        className="px-2 py-2 hover:bg-[#27272A] hover:text-white rounded-md transition-colors"
-                        onClick={() => setIsMenuOpen(false)}
-                    >
-                        Blog
-                    </Link>
-                    <Link
                         href="/#faq"
                         className="px-2 py-2 hover:bg-[#27272A] hover:text-white rounded-md transition-colors"
                         onClick={() => setIsMenuOpen(false)}
@@ -64,7 +57,6 @@ export function Header() {
                     </Link>
 
                     <div className="pt-2 mt-2 border-t border-[#27272A]">
-                        {/* We can put feedback button here for easy access on mobile */}
                         <div className="px-2 py-2">
                             <FeedbackButton />
                         </div>
