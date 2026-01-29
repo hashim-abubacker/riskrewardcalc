@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber, SupportedLocale } from '@/lib/formatters';
+import { trackAssetClassSwitch, trackRiskModeToggle, trackFormReset, trackResetUndo, trackCalculation } from '@/lib/analytics';
 
 type TradeDirection = 'LONG' | 'SHORT';
 type RiskMode = 'percent' | 'fiat';
@@ -243,6 +244,25 @@ export default function Calculator({ locale }: CalculatorProps) {
         calculate();
     }, [calculate]);
 
+    // Track successful calculations (debounced to avoid spam)
+    const calculationTrackedRef = useRef(false);
+    useEffect(() => {
+        if (outputs.isComplete && !calculationTrackedRef.current) {
+            const timeout = setTimeout(() => {
+                trackCalculation({
+                    asset_class: inputs.assetClass,
+                    leverage: parseInt(inputs.leverage) || 1,
+                    has_target_price: !!inputs.targetPrice,
+                    trade_direction: outputs.tradeDirection,
+                });
+                calculationTrackedRef.current = true;
+            }, 2000); // Track after 2 seconds of stable calculation
+            return () => clearTimeout(timeout);
+        } else if (!outputs.isComplete) {
+            calculationTrackedRef.current = false;
+        }
+    }, [outputs.isComplete, outputs.tradeDirection, inputs.assetClass, inputs.leverage, inputs.targetPrice]);
+
     const handleInputChange = (field: keyof CalculatorInputs, value: string) => {
         setInputs(prev => ({ ...prev, [field]: value }));
     };
@@ -252,9 +272,11 @@ export default function Calculator({ locale }: CalculatorProps) {
     };
 
     const toggleRiskMode = () => {
+        const newMode = inputs.riskMode === 'percent' ? 'fiat' : 'percent';
+        trackRiskModeToggle(newMode);
         setInputs(prev => ({
             ...prev,
-            riskMode: prev.riskMode === 'percent' ? 'fiat' : 'percent'
+            riskMode: newMode
         }));
     };
 
@@ -266,6 +288,9 @@ export default function Calculator({ locale }: CalculatorProps) {
         if (undoTimeoutRef.current) {
             clearTimeout(undoTimeoutRef.current);
         }
+
+        // Track form reset
+        trackFormReset();
 
         // Reset the form
         setInputs({
@@ -297,6 +322,7 @@ export default function Calculator({ locale }: CalculatorProps) {
 
     const handleUndo = () => {
         if (previousInputs) {
+            trackResetUndo();
             setInputs(previousInputs);
             setShowUndoToast(false);
             setPreviousInputs(null);
@@ -354,6 +380,9 @@ export default function Calculator({ locale }: CalculatorProps) {
                     <button
                         key={ac}
                         onClick={() => {
+                            if (inputs.assetClass !== ac) {
+                                trackAssetClassSwitch(inputs.assetClass, ac);
+                            }
                             handleInputChange('assetClass', ac);
                             if (ac === 'forex') {
                                 handleInputChange('leverage', '50');
@@ -630,7 +659,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                         <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
                             <span className="text-xs md:text-sm text-gray-400">Margin Required</span>
                             <span className={`font-mono text-sm md:text-base font-semibold ${!outputs.isComplete ? 'text-gray-600' :
-                                    outputs.insufficientMargin ? 'text-red-500' : 'text-white'
+                                outputs.insufficientMargin ? 'text-red-500' : 'text-white'
                                 }`}>
                                 {outputs.isComplete ? formatCurrency(outputs.marginRequired) : '—'}
                             </span>

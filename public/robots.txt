@@ -1,4 +1,52 @@
+# RiskRewardCalc Robots.txt
+# https://riskrewardcalc.com
+
+# Allow all standard search engine crawlers
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /portal/
 
+# Sitemap
 Sitemap: https://riskrewardcalc.com/sitemap.xml
+
+# ============================================
+# AI Crawlers - ALLOWED for AI Search/Training
+# ============================================
+
+# OpenAI's ChatGPT and GPT crawlers
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+# Google AI (Bard/Gemini)
+User-agent: Google-Extended
+Allow: /
+
+# Anthropic Claude
+User-agent: anthropic-ai
+Allow: /
+User-agent: Claude-Web
+Allow: /
+
+# Perplexity AI
+User-agent: PerplexityBot
+Allow: /
+
+# Microsoft Copilot / Bing AI
+User-agent: Bingbot
+Allow: /
+
+# Common Crawl (used by many AI models)
+User-agent: CCBot
+Allow: /
+
+# Meta AI
+User-agent: FacebookBot
+Allow: /
+
+# Apple Intelligence / Siri
+User-agent: Applebot
+Allow: /
