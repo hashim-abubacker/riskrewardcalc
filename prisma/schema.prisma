@@ -68,10 +68,10 @@ model PasswordResetToken {
 // Content Models
 model Post {
   id          String   @id @default(cuid())
-  title       String
-  slug        String   @unique
-  content     String
-  excerpt     String?
+  title       String   @db.VarChar(500)
+  slug        String   @unique @db.VarChar(500)
+  content     String   @db.LongText
+  excerpt     String?  @db.Text
   featuredImage String?
   published   Boolean  @default(false)
   publishedAt DateTime?
