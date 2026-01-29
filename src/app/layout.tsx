@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Header } from "@/components/Header";
 
-export const dynamic = 'force-dynamic';
+// Dynamic rendering is handled at page level, not layout
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -65,10 +65,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
+        {/* Critical CSS to prevent flash of unstyled content */}
+        <style dangerouslySetInnerHTML={{
+          __html: `
+          html, body { background-color: #09090B !important; color: #ededed !important; }
+          * { box-sizing: border-box; }
+        ` }} />
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#10B981" />
+        <meta name="theme-color" content="#09090B" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="RiskRewardCalc" />
