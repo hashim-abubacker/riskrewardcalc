@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber, SupportedLocale } from '@/lib/formatters';
 
 type TradeDirection = 'LONG' | 'SHORT';
@@ -20,6 +20,14 @@ interface CalculatorInputs {
     lotSize: string;
 }
 
+interface FieldErrors {
+    balance?: string;
+    riskPercent?: string;
+    riskFiat?: string;
+    entryPrice?: string;
+    stopLossPrice?: string;
+}
+
 interface CalculatorOutputs {
     positionSizeUnits: number;
     positionSizeValue: number;
@@ -31,6 +39,8 @@ interface CalculatorOutputs {
     validationError: string | null;
     insufficientMargin: boolean;
     futuresMinRisk: number | null;
+    fieldErrors: FieldErrors;
+    isComplete: boolean;
 }
 
 const STORAGE_KEY = 'riskrewardcalc_balance';
@@ -65,7 +75,18 @@ export default function Calculator({ locale }: CalculatorProps) {
         validationError: null,
         insufficientMargin: false,
         futuresMinRisk: null,
+        fieldErrors: {},
+        isComplete: false,
     });
+
+    // Track which fields have been touched for validation
+    const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+    // Reset undo state
+    const [previousInputs, setPreviousInputs] = useState<CalculatorInputs | null>(null);
+    const [showUndoToast, setShowUndoToast] = useState(false);
+    const [toastExiting, setToastExiting] = useState(false);
+    const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         const savedBalance = localStorage.getItem(STORAGE_KEY);
@@ -93,6 +114,15 @@ export default function Calculator({ locale }: CalculatorProps) {
         }
     }, [inputs.balance, inputs.riskMode, inputs.riskPercent, inputs.riskFiat]);
 
+    // Cleanup undo timeout on unmount
+    useEffect(() => {
+        return () => {
+            if (undoTimeoutRef.current) {
+                clearTimeout(undoTimeoutRef.current);
+            }
+        };
+    }, []);
+
     const calculate = useCallback(() => {
         const balance = parseFloat(inputs.balance) || 0;
         const riskPercent = parseFloat(inputs.riskPercent) || 0;
@@ -100,6 +130,42 @@ export default function Calculator({ locale }: CalculatorProps) {
         const sl = parseFloat(inputs.stopLossPrice) || 0;
         const target = parseFloat(inputs.targetPrice) || 0;
         const leverage = parseFloat(inputs.leverage) || 1;
+
+        // Field validation
+        const fieldErrors: FieldErrors = {};
+
+        if (touched.balance && !inputs.balance) {
+            fieldErrors.balance = 'Account balance is required';
+        } else if (touched.balance && balance <= 0) {
+            fieldErrors.balance = 'Balance must be greater than 0';
+        }
+
+        if (inputs.riskMode === 'percent') {
+            if (touched.riskPercent && riskPercent <= 0) {
+                fieldErrors.riskPercent = 'Risk must be greater than 0';
+            } else if (touched.riskPercent && riskPercent > 100) {
+                fieldErrors.riskPercent = 'Risk cannot exceed 100%';
+            }
+        } else {
+            if (touched.riskFiat && parseFloat(inputs.riskFiat) <= 0) {
+                fieldErrors.riskFiat = 'Risk amount must be greater than 0';
+            }
+        }
+
+        if (touched.entryPrice && !inputs.entryPrice) {
+            fieldErrors.entryPrice = 'Entry price is required';
+        } else if (touched.entryPrice && entry <= 0) {
+            fieldErrors.entryPrice = 'Entry price must be greater than 0';
+        }
+
+        if (touched.stopLossPrice && !inputs.stopLossPrice) {
+            fieldErrors.stopLossPrice = 'Stop loss price is required';
+        } else if (touched.stopLossPrice && sl <= 0) {
+            fieldErrors.stopLossPrice = 'Stop loss must be greater than 0';
+        }
+
+        // Check if all required fields are complete for calculation
+        const isComplete = balance > 0 && riskPercent > 0 && entry > 0 && sl > 0 && entry !== sl;
 
         let direction: TradeDirection | null = null;
         let validationError: string | null = null;
@@ -111,6 +177,9 @@ export default function Calculator({ locale }: CalculatorProps) {
                 direction = 'SHORT';
             } else {
                 validationError = 'Stop Loss cannot equal Entry Price';
+                if (touched.stopLossPrice) {
+                    fieldErrors.stopLossPrice = 'Stop loss cannot equal entry price';
+                }
             }
         }
 
@@ -122,27 +191,13 @@ export default function Calculator({ locale }: CalculatorProps) {
         if (inputs.assetClass === 'stocks') {
             positionSizeUnits = Math.floor(positionSizeUnits);
         } else if (inputs.assetClass === 'forex') {
-            // Check if we should display lots here or just convert for display?
-            // "Result = (Raw Units / 100,000). Label result as 'Lots'."
-            // If I change positionSizeUnits here, it affects positionSizeValue calculation below.
-            // Usually positionSizeValue = units * entry.
-            // If Forex result is "Lots", does the user want to see Lots in the big number?
-            // Yes. But margin calculation needs actual units or lots * 100k?
-            // Margin = (Units * Price) / Leverage.
-            // If I convert positionSizeUnits to Lots here, I need to convert back for Margin.
-            // Let's keep positionSizeUnits as "Raw Units" for value/margin calc, 
-            // but for the *display* (which uses this state), the prompt says "Result = ...".
-            // So I should probably store the "Display Units" or handle it in the view.
-            // HOWEVER, the "Result" output variable `positionSizeUnits` is explicitly defined in interface.
-            // Let's modify `positionSizeUnits` to be the "Result" the user sees, and adjust `positionSizeValue` calc.
-
             positionSizeUnits = positionSizeUnits / 100000;
         } else if (inputs.assetClass === 'futures') {
             const lotSize = parseFloat(inputs.lotSize) || 1;
             positionSizeUnits = Math.floor(positionSizeUnits / lotSize) * lotSize;
         }
+
         // Calculate Value and Margin based on "Real" units
-        // For Forex, positionSizeUnits is now in Lots, so we multiply by 100,000 to get real units for value calc
         const realUnits = inputs.assetClass === 'forex' ? positionSizeUnits * 100000 : positionSizeUnits;
 
         const positionSizeValue = realUnits * entry;
@@ -179,8 +234,10 @@ export default function Calculator({ locale }: CalculatorProps) {
             validationError,
             insufficientMargin,
             futuresMinRisk,
+            fieldErrors,
+            isComplete,
         });
-    }, [inputs]);
+    }, [inputs, touched]);
 
     useEffect(() => {
         calculate();
@@ -188,6 +245,10 @@ export default function Calculator({ locale }: CalculatorProps) {
 
     const handleInputChange = (field: keyof CalculatorInputs, value: string) => {
         setInputs(prev => ({ ...prev, [field]: value }));
+    };
+
+    const handleBlur = (field: string) => {
+        setTouched(prev => ({ ...prev, [field]: true }));
     };
 
     const toggleRiskMode = () => {
@@ -198,8 +259,17 @@ export default function Calculator({ locale }: CalculatorProps) {
     };
 
     const handleReset = () => {
+        // Store previous inputs for undo
+        setPreviousInputs({ ...inputs });
+
+        // Clear any existing timeout
+        if (undoTimeoutRef.current) {
+            clearTimeout(undoTimeoutRef.current);
+        }
+
+        // Reset the form
         setInputs({
-            assetClass: inputs.assetClass, // Keep selected asset class
+            assetClass: inputs.assetClass,
             balance: inputs.balance,
             riskMode: 'percent',
             riskPercent: '1',
@@ -210,6 +280,30 @@ export default function Calculator({ locale }: CalculatorProps) {
             leverage: '10',
             lotSize: '50',
         });
+        setTouched({});
+        setToastExiting(false);
+        setShowUndoToast(true);
+
+        // Auto-hide toast after 5 seconds
+        undoTimeoutRef.current = setTimeout(() => {
+            setToastExiting(true);
+            setTimeout(() => {
+                setShowUndoToast(false);
+                setPreviousInputs(null);
+                setToastExiting(false);
+            }, 300);
+        }, 5000);
+    };
+
+    const handleUndo = () => {
+        if (previousInputs) {
+            setInputs(previousInputs);
+            setShowUndoToast(false);
+            setPreviousInputs(null);
+            if (undoTimeoutRef.current) {
+                clearTimeout(undoTimeoutRef.current);
+            }
+        }
     };
 
     const formatNumber = (num: number, decimals: number = 2): string => {
@@ -220,6 +314,26 @@ export default function Calculator({ locale }: CalculatorProps) {
     const formatCurrency = (num: number): string => {
         if (isNaN(num) || !isFinite(num)) return intlFormatCurrency(0, locale);
         return intlFormatCurrency(num, locale);
+    };
+
+    // Helper to get input error class
+    const getInputClass = (field: keyof FieldErrors, baseClass: string): string => {
+        const hasError = outputs.fieldErrors[field];
+        return `${baseClass} ${hasError ? 'border-red-500 focus:border-red-500' : 'border-[#3A3A3A] focus:border-emerald-500'}`;
+    };
+
+    // Helper to render field error
+    const renderFieldError = (field: keyof FieldErrors) => {
+        const error = outputs.fieldErrors[field];
+        if (!error) return null;
+        return (
+            <div className="flex items-center gap-1 mt-1 text-red-400 text-xs">
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <span>{error}</span>
+            </div>
+        );
     };
 
     return (
@@ -241,7 +355,6 @@ export default function Calculator({ locale }: CalculatorProps) {
                         key={ac}
                         onClick={() => {
                             handleInputChange('assetClass', ac);
-                            // Update leverage default based on asset class
                             if (ac === 'forex') {
                                 handleInputChange('leverage', '50');
                             } else {
@@ -272,52 +385,69 @@ export default function Calculator({ locale }: CalculatorProps) {
                     <div className="p-3 md:p-4 space-y-3">
                         {/* Account Balance */}
                         <div>
-                            <label className="block text-xs md:text-sm text-gray-400 mb-1">Account Balance</label>
+                            <label className="block text-xs md:text-sm text-gray-400 mb-1">
+                                Account Balance
+                                <span className="text-red-400 ml-0.5">*</span>
+                            </label>
                             <div className="relative">
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
                                 <input
                                     type="number"
-                                    className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
+                                    className={getInputClass('balance', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
                                     placeholder="25,000"
                                     value={inputs.balance}
                                     onChange={(e) => handleInputChange('balance', e.target.value)}
+                                    onBlur={() => handleBlur('balance')}
+                                    tabIndex={1}
                                 />
                             </div>
+                            {renderFieldError('balance')}
                         </div>
 
                         {/* Risk Mode Toggle */}
                         <div>
                             <div className="flex items-center justify-between mb-1">
-                                <label className="text-xs md:text-sm text-gray-400">Risk Mode</label>
+                                <label className="text-xs md:text-sm text-gray-400">
+                                    Risk Mode
+                                    <span className="text-red-400 ml-0.5">*</span>
+                                </label>
                                 <div
                                     className="flex items-center gap-1.5 cursor-pointer"
                                     onClick={toggleRiskMode}
+                                    role="button"
+                                    tabIndex={2}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleRiskMode(); }}
+                                    aria-label={`Switch to ${inputs.riskMode === 'percent' ? 'dollar amount' : 'percentage'} mode`}
                                 >
-                                    <span className="text-xs text-gray-500">$</span>
+                                    <span className={`text-xs ${inputs.riskMode === 'fiat' ? 'text-emerald-400' : 'text-gray-500'}`}>$</span>
                                     <div className={`relative w-10 md:w-12 h-5 md:h-6 rounded-full transition-colors ${inputs.riskMode === 'percent' ? 'bg-emerald-500' : 'bg-[#3A3A3A]'}`}>
                                         <div className={`absolute top-0.5 md:top-1 w-4 h-4 bg-white rounded-full transition-transform flex items-center justify-center text-[8px] md:text-[10px] font-bold text-gray-900 ${inputs.riskMode === 'percent' ? 'left-5 md:left-6' : 'left-0.5 md:left-1'}`}>
                                             {inputs.riskMode === 'percent' ? '%' : '$'}
                                         </div>
                                     </div>
-                                    <span className="text-xs text-gray-500">%</span>
+                                    <span className={`text-xs ${inputs.riskMode === 'percent' ? 'text-emerald-400' : 'text-gray-500'}`}>%</span>
                                 </div>
                             </div>
                             <input
                                 type="number"
-                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 text-white text-sm focus:outline-none focus:border-emerald-500"
+                                className={getInputClass(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 text-white text-sm focus:outline-none')}
                                 placeholder={inputs.riskMode === 'percent' ? '1' : '100'}
                                 value={inputs.riskMode === 'percent' ? inputs.riskPercent : inputs.riskFiat}
                                 onChange={(e) => handleInputChange(
                                     inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat',
                                     e.target.value
                                 )}
+                                onBlur={() => handleBlur(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat')}
+                                tabIndex={3}
                             />
+                            {renderFieldError(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat')}
                         </div>
 
                         {/* Entry Price */}
                         <div>
                             <label className="block text-xs md:text-sm text-gray-400 mb-1">
                                 Entry Price
+                                <span className="text-red-400 ml-0.5">*</span>
                                 {outputs.tradeDirection && (
                                     <span className={`ml-1.5 text-xs ${outputs.tradeDirection === 'LONG' ? 'text-emerald-500' : 'text-red-500'}`}>
                                         ({outputs.tradeDirection})
@@ -328,27 +458,36 @@ export default function Calculator({ locale }: CalculatorProps) {
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
                                 <input
                                     type="number"
-                                    className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
+                                    className={getInputClass('entryPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
                                     placeholder="45,000"
                                     value={inputs.entryPrice}
                                     onChange={(e) => handleInputChange('entryPrice', e.target.value)}
+                                    onBlur={() => handleBlur('entryPrice')}
+                                    tabIndex={4}
                                 />
                             </div>
+                            {renderFieldError('entryPrice')}
                         </div>
 
                         {/* Stop Loss Price */}
                         <div>
-                            <label className="block text-xs md:text-sm text-gray-400 mb-1">Stop Loss Price</label>
+                            <label className="block text-xs md:text-sm text-gray-400 mb-1">
+                                Stop Loss Price
+                                <span className="text-red-400 ml-0.5">*</span>
+                            </label>
                             <div className="relative">
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
                                 <input
                                     type="number"
-                                    className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
+                                    className={getInputClass('stopLossPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
                                     placeholder="43,500"
                                     value={inputs.stopLossPrice}
                                     onChange={(e) => handleInputChange('stopLossPrice', e.target.value)}
+                                    onBlur={() => handleBlur('stopLossPrice')}
+                                    tabIndex={5}
                                 />
                             </div>
+                            {renderFieldError('stopLossPrice')}
                         </div>
 
                         {/* Target Price */}
@@ -364,6 +503,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                                     placeholder="50,000"
                                     value={inputs.targetPrice}
                                     onChange={(e) => handleInputChange('targetPrice', e.target.value)}
+                                    tabIndex={6}
                                 />
                             </div>
                         </div>
@@ -380,6 +520,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                                 value={inputs.leverage}
                                 onChange={(e) => handleInputChange('leverage', e.target.value)}
                                 className="w-full h-1 bg-[#3A3A3A] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:w-4 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
+                                tabIndex={7}
                             />
                             <div className="flex justify-between text-[10px] md:text-xs text-gray-600 mt-0.5">
                                 <span>1x</span>
@@ -401,6 +542,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                                         placeholder="50"
                                         value={inputs.lotSize}
                                         onChange={(e) => handleInputChange('lotSize', e.target.value)}
+                                        tabIndex={8}
                                     />
                                 </div>
                             </div>
@@ -408,8 +550,11 @@ export default function Calculator({ locale }: CalculatorProps) {
 
                         {/* Validation Error */}
                         {outputs.validationError && (
-                            <div className="bg-red-500/10 border border-red-500/30 rounded-md p-2 text-red-400 text-xs">
-                                ⚠️ {outputs.validationError}
+                            <div className="bg-red-500/10 border border-red-500/30 rounded-md p-2 text-red-400 text-xs flex items-center gap-2">
+                                <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                {outputs.validationError}
                             </div>
                         )}
 
@@ -417,6 +562,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                         <button
                             onClick={handleReset}
                             className="w-full py-2 md:py-2.5 px-3 bg-transparent border border-[#3A3A3A] rounded-md md:rounded-lg text-gray-400 text-xs md:text-sm font-medium hover:border-gray-500 hover:text-white transition-colors"
+                            tabIndex={9}
                         >
                             Reset
                         </button>
@@ -439,6 +585,21 @@ export default function Calculator({ locale }: CalculatorProps) {
                                     To trade 1 Lot, you must risk at least <span className="font-bold">{formatCurrency(outputs.futuresMinRisk)}</span>.
                                     <br />
                                     Increase your Risk % or widen your Stop Loss.
+                                </div>
+                            </div>
+                        ) : !outputs.isComplete ? (
+                            // Incomplete input state - H1 feedback
+                            <div className="py-2">
+                                <div className="text-xs md:text-sm text-gray-500 mb-1">Position Size</div>
+                                <div className="font-mono">
+                                    <span className="text-2xl md:text-3xl font-bold text-gray-600">—</span>
+                                    <span className="text-sm md:text-base text-gray-600 ml-1.5">
+                                        {inputs.assetClass === 'stocks' ? 'Shares' :
+                                            inputs.assetClass === 'forex' ? 'Lots' : 'Units'}
+                                    </span>
+                                </div>
+                                <div className="text-xs text-gray-500 mt-2 bg-[#0D0D0D] rounded-md py-2 px-3 inline-block">
+                                    💡 Enter balance, entry & stop loss to calculate
                                 </div>
                             </div>
                         ) : (
@@ -468,15 +629,20 @@ export default function Calculator({ locale }: CalculatorProps) {
                         {/* Margin Required */}
                         <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
                             <span className="text-xs md:text-sm text-gray-400">Margin Required</span>
-                            <span className={`font-mono text-sm md:text-base font-semibold ${outputs.insufficientMargin ? 'text-red-500' : 'text-white'}`}>
-                                {formatCurrency(outputs.marginRequired)}
+                            <span className={`font-mono text-sm md:text-base font-semibold ${!outputs.isComplete ? 'text-gray-600' :
+                                    outputs.insufficientMargin ? 'text-red-500' : 'text-white'
+                                }`}>
+                                {outputs.isComplete ? formatCurrency(outputs.marginRequired) : '—'}
                             </span>
                         </div>
 
                         {outputs.insufficientMargin && (
                             <div className="px-3 md:px-4 py-1.5 bg-red-500/10 border-b border-[#2A2A2A]">
-                                <span className="text-red-400 text-[10px] md:text-xs">
-                                    ⚠️ Need {formatCurrency(outputs.marginRequired - parseFloat(inputs.balance))} more
+                                <span className="text-red-400 text-[10px] md:text-xs flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                    </svg>
+                                    Need {formatCurrency(outputs.marginRequired - parseFloat(inputs.balance))} more
                                 </span>
                             </div>
                         )}
@@ -484,13 +650,19 @@ export default function Calculator({ locale }: CalculatorProps) {
                         {/* Risk Amount */}
                         <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
                             <span className="text-xs md:text-sm text-gray-400">Risk Amount</span>
-                            <span className="font-mono text-sm md:text-base font-semibold text-red-500">{formatCurrency(outputs.riskAmount)}</span>
+                            <span className={`font-mono text-sm md:text-base font-semibold ${outputs.isComplete ? 'text-red-500' : 'text-gray-600'
+                                }`}>
+                                {outputs.isComplete ? formatCurrency(outputs.riskAmount) : '—'}
+                            </span>
                         </div>
 
                         {/* Potential Profit */}
                         <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
                             <span className="text-xs md:text-sm text-gray-400">Potential Profit</span>
-                            <span className="font-mono text-sm md:text-base font-semibold text-emerald-500">{formatCurrency(outputs.potentialProfit)}</span>
+                            <span className={`font-mono text-sm md:text-base font-semibold ${outputs.potentialProfit > 0 ? 'text-emerald-500' : 'text-gray-600'
+                                }`}>
+                                {outputs.potentialProfit > 0 ? formatCurrency(outputs.potentialProfit) : '—'}
+                            </span>
                         </div>
 
                         {/* Risk:Reward Ratio */}
@@ -500,6 +672,15 @@ export default function Calculator({ locale }: CalculatorProps) {
                                 {outputs.rrr > 0 ? `1:${formatNumber(outputs.rrr, 1)}` : '—'}
                             </span>
                         </div>
+
+                        {/* Helper text for RRR when target not entered but other fields are complete */}
+                        {outputs.isComplete && !inputs.targetPrice && (
+                            <div className="px-3 md:px-4 py-2 bg-[#0D0D0D] border-t border-[#2A2A2A]">
+                                <span className="text-gray-500 text-[10px] md:text-xs">
+                                    💡 Enter Target Price to see Risk:Reward ratio
+                                </span>
+                            </div>
+                        )}
                     </div>
 
                     {/* Formula */}
@@ -508,6 +689,37 @@ export default function Calculator({ locale }: CalculatorProps) {
                     </div>
                 </div>
             </div>
+
+            {/* Undo Toast */}
+            {showUndoToast && (
+                <div
+                    className={`fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-[#1A1A1A] border border-[#3A3A3A] rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 z-50 ${toastExiting ? 'toast-exit' : 'toast-enter'}`}
+                >
+                    <span className="text-sm text-gray-300">Form reset</span>
+                    <button
+                        onClick={handleUndo}
+                        className="text-sm font-medium text-emerald-500 hover:text-emerald-400 transition-colors"
+                    >
+                        Undo
+                    </button>
+                    <button
+                        onClick={() => {
+                            setToastExiting(true);
+                            setTimeout(() => {
+                                setShowUndoToast(false);
+                                setPreviousInputs(null);
+                                setToastExiting(false);
+                            }, 300);
+                        }}
+                        className="text-gray-500 hover:text-gray-400 transition-colors ml-1"
+                        aria-label="Dismiss"
+                    >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

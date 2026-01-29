@@ -73,6 +73,9 @@ export default function RootLayout({
           html, body { background-color: #09090B !important; color: #ededed !important; }
           * { box-sizing: border-box; }
         ` }} />
+        {/* Favicon for all browsers */}
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#09090B" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
