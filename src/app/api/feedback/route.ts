@@ -74,15 +74,18 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Create email transporter
+        // Create email transporter for Hostinger SMTP
         const transporter = nodemailer.createTransport({
-            host: process.env.EMAIL_SERVER_HOST || 'localhost',
-            port: parseInt(process.env.EMAIL_SERVER_PORT || '1025'),
-            secure: false,
-            auth: process.env.EMAIL_SERVER_USER ? {
-                user: process.env.EMAIL_SERVER_USER,
-                pass: process.env.EMAIL_SERVER_PASSWORD,
-            } : undefined,
+            host: process.env.EMAIL_SERVER_HOST || 'smtp.hostinger.com',
+            port: parseInt(process.env.EMAIL_SERVER_PORT || '587'),
+            secure: false, // false for port 587 (STARTTLS)
+            requireTLS: true, // Required for Hostinger
+            auth: {
+                user: process.env.EMAIL_SERVER_USER || '',
+                pass: process.env.EMAIL_SERVER_PASSWORD || '',
+            },
+            connectionTimeout: 10000, // 10 seconds
+            greetingTimeout: 10000,
         });
 
         // Send email
