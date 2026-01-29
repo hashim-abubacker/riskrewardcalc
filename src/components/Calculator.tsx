@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber, SupportedLocale } from '@/lib/formatters';
+import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber, getCurrencySymbol, SupportedLocale } from '@/lib/formatters';
 import { trackAssetClassSwitch, trackRiskModeToggle, trackFormReset, trackResetUndo, trackCalculation } from '@/lib/analytics';
 
 type TradeDirection = 'LONG' | 'SHORT';
@@ -342,6 +342,9 @@ export default function Calculator({ locale }: CalculatorProps) {
         return intlFormatCurrency(num, locale);
     };
 
+    // Get currency symbol for input fields
+    const currencySymbol = getCurrencySymbol(locale);
+
     // Helper to get input error class
     const getInputClass = (field: keyof FieldErrors, baseClass: string): string => {
         const hasError = outputs.fieldErrors[field];
@@ -419,7 +422,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                                 <span className="text-red-400 ml-0.5">*</span>
                             </label>
                             <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
                                 <input
                                     type="number"
                                     className={getInputClass('balance', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
@@ -448,10 +451,10 @@ export default function Calculator({ locale }: CalculatorProps) {
                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleRiskMode(); }}
                                     aria-label={`Switch to ${inputs.riskMode === 'percent' ? 'dollar amount' : 'percentage'} mode`}
                                 >
-                                    <span className={`text-xs ${inputs.riskMode === 'fiat' ? 'text-emerald-400' : 'text-gray-500'}`}>$</span>
+                                    <span className={`text-xs ${inputs.riskMode === 'fiat' ? 'text-emerald-400' : 'text-gray-500'}`}>{currencySymbol}</span>
                                     <div className={`relative w-10 md:w-12 h-5 md:h-6 rounded-full transition-colors ${inputs.riskMode === 'percent' ? 'bg-emerald-500' : 'bg-[#3A3A3A]'}`}>
                                         <div className={`absolute top-0.5 md:top-1 w-4 h-4 bg-white rounded-full transition-transform flex items-center justify-center text-[8px] md:text-[10px] font-bold text-gray-900 ${inputs.riskMode === 'percent' ? 'left-5 md:left-6' : 'left-0.5 md:left-1'}`}>
-                                            {inputs.riskMode === 'percent' ? '%' : '$'}
+                                            {inputs.riskMode === 'percent' ? '%' : currencySymbol}
                                         </div>
                                     </div>
                                     <span className={`text-xs ${inputs.riskMode === 'percent' ? 'text-emerald-400' : 'text-gray-500'}`}>%</span>
@@ -484,7 +487,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                                 )}
                             </label>
                             <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
                                 <input
                                     type="number"
                                     className={getInputClass('entryPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
@@ -505,7 +508,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                                 <span className="text-red-400 ml-0.5">*</span>
                             </label>
                             <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
                                 <input
                                     type="number"
                                     className={getInputClass('stopLossPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
@@ -525,7 +528,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                                 Target Price <span className="text-gray-600">(Optional)</span>
                             </label>
                             <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
                                 <input
                                     type="number"
                                     className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"

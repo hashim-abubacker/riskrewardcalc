@@ -1,21 +1,35 @@
 /**
  * Internationalization (i18n) formatters using the Intl API
- * Supports major currencies and locales for number formatting
+ * Supports major currencies for number formatting
  */
 
-export type SupportedLocale = 'en-US' | 'en-GB' | 'de-DE' | 'es-ES' | 'fr-FR' | 'ja-JP' | 'zh-CN' | 'en-IN' | 'ar-AE';
+export type SupportedLocale = 'en-US' | 'en-GB' | 'EUR' | 'ja-JP' | 'zh-CN' | 'en-IN' | 'ar-AE';
 
-export const SUPPORTED_LOCALES: { code: SupportedLocale; name: string; currency: string }[] = [
-    { code: 'en-US', name: 'English (US)', currency: 'USD' },
-    { code: 'en-GB', name: 'English (UK)', currency: 'GBP' },
-    { code: 'de-DE', name: 'Deutsch', currency: 'EUR' },
-    { code: 'es-ES', name: 'Español', currency: 'EUR' },
-    { code: 'fr-FR', name: 'Français', currency: 'EUR' },
-    { code: 'ja-JP', name: '日本語', currency: 'JPY' },
-    { code: 'zh-CN', name: '中文', currency: 'CNY' },
-    { code: 'en-IN', name: 'English (India)', currency: 'INR' },
-    { code: 'ar-AE', name: 'العربية (UAE)', currency: 'AED' },
+export const SUPPORTED_LOCALES: { code: SupportedLocale; name: string; currency: string; symbol: string }[] = [
+    { code: 'en-US', name: 'USD', currency: 'USD', symbol: '$' },
+    { code: 'en-GB', name: 'GBP', currency: 'GBP', symbol: '£' },
+    { code: 'EUR', name: 'EUR', currency: 'EUR', symbol: '€' },
+    { code: 'ja-JP', name: 'JPY', currency: 'JPY', symbol: '¥' },
+    { code: 'zh-CN', name: 'CNY', currency: 'CNY', symbol: '¥' },
+    { code: 'en-IN', name: 'INR', currency: 'INR', symbol: '₹' },
+    { code: 'ar-AE', name: 'AED', currency: 'AED', symbol: 'د.إ' },
 ];
+
+/**
+ * Get the locale code for Intl API (EUR uses de-DE formatting)
+ */
+function getIntlLocale(locale: SupportedLocale): string {
+    if (locale === 'EUR') return 'de-DE';
+    return locale;
+}
+
+/**
+ * Get currency symbol for a locale
+ */
+export function getCurrencySymbol(locale: SupportedLocale): string {
+    const localeData = SUPPORTED_LOCALES.find(l => l.code === locale);
+    return localeData?.symbol || '$';
+}
 
 /**
  * Format currency with locale-specific formatting
@@ -23,8 +37,9 @@ export const SUPPORTED_LOCALES: { code: SupportedLocale; name: string; currency:
 export function formatCurrency(value: number, locale: SupportedLocale): string {
     const localeData = SUPPORTED_LOCALES.find(l => l.code === locale);
     const currency = localeData?.currency || 'USD';
+    const intlLocale = getIntlLocale(locale);
 
-    return new Intl.NumberFormat(locale, {
+    return new Intl.NumberFormat(intlLocale, {
         style: 'currency',
         currency: currency,
         minimumFractionDigits: 2,
@@ -36,7 +51,8 @@ export function formatCurrency(value: number, locale: SupportedLocale): string {
  * Format number with locale-specific formatting
  */
 export function formatNumber(value: number, locale: SupportedLocale, decimals: number = 4): string {
-    return new Intl.NumberFormat(locale, {
+    const intlLocale = getIntlLocale(locale);
+    return new Intl.NumberFormat(intlLocale, {
         minimumFractionDigits: 0,
         maximumFractionDigits: decimals,
     }).format(value);
@@ -46,7 +62,8 @@ export function formatNumber(value: number, locale: SupportedLocale, decimals: n
  * Format percentage with locale-specific formatting
  */
 export function formatPercentage(value: number, locale: SupportedLocale): string {
-    return new Intl.NumberFormat(locale, {
+    const intlLocale = getIntlLocale(locale);
+    return new Intl.NumberFormat(intlLocale, {
         style: 'percent',
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
@@ -60,9 +77,16 @@ export function detectLocale(): SupportedLocale {
     if (typeof window === 'undefined') return 'en-US';
 
     const browserLocale = navigator.language;
-    const supported = SUPPORTED_LOCALES.find(l => l.code === browserLocale);
 
+    // Check for exact match
+    const supported = SUPPORTED_LOCALES.find(l => l.code === browserLocale);
     if (supported) return supported.code;
+
+    // Check for EUR countries
+    const euroLocales = ['de-DE', 'es-ES', 'fr-FR', 'it-IT', 'nl-NL', 'pt-PT'];
+    if (euroLocales.some(el => browserLocale.startsWith(el.split('-')[0]))) {
+        return 'EUR';
+    }
 
     // Try to match just the language part (e.g., "en" from "en-AU")
     const lang = browserLocale.split('-')[0];
