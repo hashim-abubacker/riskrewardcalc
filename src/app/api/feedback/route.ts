@@ -89,11 +89,30 @@ export async function POST(req: NextRequest) {
             socketTimeout: 15000,
         });
 
+        // Verify SMTP connection before sending
+        try {
+            await transporter.verify();
+            console.log('SMTP connection verified successfully');
+        } catch (verifyError) {
+            console.error('SMTP verification failed:', verifyError);
+            console.error('SMTP Config:', {
+                host: process.env.EMAIL_SERVER_HOST,
+                port: port,
+                user: process.env.EMAIL_SERVER_USER ? '***set***' : '***NOT SET***',
+                pass: process.env.EMAIL_SERVER_PASSWORD ? '***set***' : '***NOT SET***',
+            });
+            return NextResponse.json(
+                { error: 'Email server connection failed. Please try again later.' },
+                { status: 500 }
+            );
+        }
+
         // Send email
         const userEmail = email?.trim() || 'Anonymous';
         await transporter.sendMail({
-            from: process.env.EMAIL_FROM || 'noreply@riskrewardcalc.com',
+            from: process.env.EMAIL_FROM || 'feedback@riskrewardcalc.com',
             to: 'feedback@riskrewardcalc.com',
+            replyTo: userEmail !== 'Anonymous' ? userEmail : undefined,
             subject: 'New Feedback from RiskRewardCalc',
             text: `From: ${userEmail}\n\nMessage:\n${message}\n\n---\nSent from RiskRewardCalc Feedback Form`,
             html: `
@@ -116,6 +135,8 @@ export async function POST(req: NextRequest) {
         });
     } catch (error) {
         console.error('Feedback API error:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Error details:', errorMessage);
         return NextResponse.json(
             { error: 'Failed to send feedback' },
             { status: 500 }

@@ -83,6 +83,52 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Explore Calculators - Internal Linking */}
+        <div className="max-w-[1000px] mx-auto px-3 mt-8">
+          <h2 className="text-lg md:text-xl font-semibold text-white mb-4 text-center">
+            Explore Calculators by Asset
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Forex Card */}
+            <a
+              href="/forex"
+              className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-5 hover:border-emerald-500/50 transition-all group block"
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-2xl">💱</span>
+                <h3 className="text-lg font-semibold text-white group-hover:text-emerald-400 transition-colors">
+                  Forex Calculator
+                </h3>
+              </div>
+              <p className="text-sm text-gray-400">
+                EUR/USD, GBP/USD, Gold (XAU/USD), Silver, and 14 currency pairs with pip value calculations.
+              </p>
+              <div className="mt-3 text-xs text-emerald-500 group-hover:underline">
+                Explore all pairs →
+              </div>
+            </a>
+
+            {/* Crypto Card */}
+            <a
+              href="/crypto"
+              className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-5 hover:border-emerald-500/50 transition-all group block"
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-2xl">₿</span>
+                <h3 className="text-lg font-semibold text-white group-hover:text-emerald-400 transition-colors">
+                  Crypto Calculator
+                </h3>
+              </div>
+              <p className="text-sm text-gray-400">
+                Bitcoin, Ethereum, Solana, and top 10 cryptocurrencies with risk-based position sizing.
+              </p>
+              <div className="mt-3 text-xs text-emerald-500 group-hover:underline">
+                Explore all coins →
+              </div>
+            </a>
+          </div>
+        </div>
+
         {/* FAQ Section */}
         <div id="faq" className="max-w-[1000px] mx-auto px-3 mt-8 md:mt-12 pb-12">
           <h2 className="text-xl md:text-2xl font-bold text-white mb-6 text-center md:text-left">

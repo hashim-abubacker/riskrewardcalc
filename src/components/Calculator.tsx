@@ -3,10 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber, getCurrencySymbol, SupportedLocale } from '@/lib/formatters';
 import { trackAssetClassSwitch, trackRiskModeToggle, trackFormReset, trackResetUndo, trackCalculation } from '@/lib/analytics';
+import { FOREX_PAIRS, ForexPair, calculatePipValue } from '@/lib/forexPairs';
 
 type TradeDirection = 'LONG' | 'SHORT';
 type RiskMode = 'percent' | 'fiat';
 type AssetClass = 'crypto' | 'stocks' | 'forex' | 'futures';
+type StopLossMode = 'price' | 'pips';
 
 interface CalculatorInputs {
     assetClass: AssetClass;
@@ -19,6 +21,10 @@ interface CalculatorInputs {
     targetPrice: string;
     leverage: string;
     lotSize: string;
+    // Forex-specific
+    forexPair: string;
+    stopLossMode: StopLossMode;
+    stopLossPips: string;
 }
 
 interface FieldErrors {
@@ -40,6 +46,8 @@ interface CalculatorOutputs {
     validationError: string | null;
     insufficientMargin: boolean;
     futuresMinRisk: number | null;
+    forexMinRisk: number | null;
+    pipValue: number | null;
     fieldErrors: FieldErrors;
     isComplete: boolean;
 }
@@ -48,22 +56,37 @@ const STORAGE_KEY = 'riskrewardcalc_balance';
 
 interface CalculatorProps {
     locale: SupportedLocale;
+    defaultAssetClass?: AssetClass;
+    defaultForexPair?: string;
+    defaultEntryPrice?: string;
+    forceUpdateId?: number;
 }
 
-export default function Calculator({ locale }: CalculatorProps) {
+export default function Calculator({ locale, defaultAssetClass, defaultForexPair, defaultEntryPrice, forceUpdateId }: CalculatorProps) {
     // Calculator State Initialization
     const [inputs, setInputs] = useState<CalculatorInputs>({
-        assetClass: 'crypto',
+        assetClass: defaultAssetClass || 'crypto',
         balance: '',
         riskMode: 'percent',
         riskPercent: '1',
         riskFiat: '',
-        entryPrice: '',
+        entryPrice: defaultEntryPrice || '',
         stopLossPrice: '',
         targetPrice: '',
-        leverage: '10',
+        leverage: defaultAssetClass === 'forex' ? '100' : '10',
         lotSize: '50',
+        // Forex-specific
+        forexPair: defaultForexPair || 'EURUSD',
+        stopLossMode: 'price',
+        stopLossPips: '',
     });
+
+    // Update entry price when defaultEntryPrice changes (from live price)
+    useEffect(() => {
+        if (defaultEntryPrice) {
+            setInputs(prev => ({ ...prev, entryPrice: defaultEntryPrice }));
+        }
+    }, [defaultEntryPrice, forceUpdateId]);
 
     const [outputs, setOutputs] = useState<CalculatorOutputs>({
         positionSizeUnits: 0,
@@ -76,6 +99,8 @@ export default function Calculator({ locale }: CalculatorProps) {
         validationError: null,
         insufficientMargin: false,
         futuresMinRisk: null,
+        forexMinRisk: null,
+        pipValue: null,
         fieldErrors: {},
         isComplete: false,
     });
@@ -159,47 +184,104 @@ export default function Calculator({ locale }: CalculatorProps) {
             fieldErrors.entryPrice = 'Entry price must be greater than 0';
         }
 
-        if (touched.stopLossPrice && !inputs.stopLossPrice) {
-            fieldErrors.stopLossPrice = 'Stop loss price is required';
-        } else if (touched.stopLossPrice && sl <= 0) {
-            fieldErrors.stopLossPrice = 'Stop loss must be greater than 0';
+        // Determine active mode for validation
+        const isForexPips = inputs.assetClass === 'forex' && inputs.stopLossMode === 'pips';
+
+        if (!isForexPips) {
+            if (touched.stopLossPrice && !inputs.stopLossPrice) {
+                fieldErrors.stopLossPrice = 'Stop loss price is required';
+            } else if (touched.stopLossPrice && sl <= 0) {
+                fieldErrors.stopLossPrice = 'Stop loss must be greater than 0';
+            }
+        } else {
+            // Validate Pips input (using same error key 'stopLossPrice' to show under the shared container)
+            const pips = parseFloat(inputs.stopLossPips) || 0;
+            if (touched.stopLossPrice && !inputs.stopLossPips) {
+                fieldErrors.stopLossPrice = 'Stop loss pips is required';
+            } else if (touched.stopLossPrice && pips <= 0) {
+                fieldErrors.stopLossPrice = 'Pips must be greater than 0';
+            }
         }
 
         // Check if all required fields are complete for calculation
-        const isComplete = balance > 0 && riskPercent > 0 && entry > 0 && sl > 0 && entry !== sl;
+        // For Forex Pips mode, we don't need Stop Loss Price
+        const slRequired = !isForexPips;
+        const slPips = parseFloat(inputs.stopLossPips) || 0;
+
+        const isComplete = balance > 0 && riskPercent > 0 && entry > 0 && (slRequired ? sl > 0 : slPips > 0);
 
         let direction: TradeDirection | null = null;
         let validationError: string | null = null;
 
-        if (entry > 0 && sl > 0) {
-            if (sl < entry) {
-                direction = 'LONG';
-            } else if (sl > entry) {
-                direction = 'SHORT';
-            } else {
-                validationError = 'Stop Loss cannot equal Entry Price';
-                if (touched.stopLossPrice) {
-                    fieldErrors.stopLossPrice = 'Stop loss cannot equal entry price';
+        if (entry > 0) {
+            if (slRequired && sl > 0) {
+                if (sl < entry) {
+                    direction = 'LONG';
+                } else if (sl > entry) {
+                    direction = 'SHORT';
+                } else {
+                    validationError = 'Stop Loss cannot equal Entry Price';
+                    if (touched.stopLossPrice) {
+                        fieldErrors.stopLossPrice = 'Stop loss cannot equal entry price';
+                    }
+                }
+            } else if (isForexPips && slPips > 0) {
+                // In Pips mode, we can't infer direction unless Target is set, or we default.
+                // For now, leave direction null or infer from Target if available
+                if (target > 0) {
+                    direction = target > entry ? 'LONG' : 'SHORT';
                 }
             }
         }
 
         const riskAmount = (balance * riskPercent) / 100;
-        const priceDiff = Math.abs(entry - sl);
+
+        let priceDiff = 0;
+        if (isForexPips) {
+            const selectedPair = FOREX_PAIRS[inputs.forexPair];
+            if (selectedPair) {
+                priceDiff = slPips * selectedPair.pipSize;
+            }
+        } else {
+            // Round to avoid floating point issues (e.g. 1.2520 - 1.2500 = 0.001999999)
+            priceDiff = Math.round(Math.abs(entry - sl) * 1000000000) / 1000000000;
+        }
+
         let positionSizeUnits = priceDiff > 0 ? riskAmount / priceDiff : 0;
+        let pipValue: number | null = null;
 
         // Apply Asset Class Logic
         if (inputs.assetClass === 'stocks') {
             positionSizeUnits = Math.floor(positionSizeUnits);
         } else if (inputs.assetClass === 'forex') {
-            positionSizeUnits = positionSizeUnits / 100000;
+            // Get the selected forex pair configuration
+            const selectedPair = FOREX_PAIRS[inputs.forexPair];
+            if (selectedPair) {
+                const contractSize = selectedPair.contractSize;
+                // For forex: lots = risk / (price_diff * contract_size)
+                const rawLots = priceDiff > 0 ? riskAmount / (priceDiff * contractSize) : 0;
+                // Round to 2 decimal places (0.01 lot minimum)
+                // Add epsilon to handle floating point errors (e.g. 0.499999 -> 0.50)
+                positionSizeUnits = Math.floor((rawLots + 0.000000001) * 100) / 100;
+                // Calculate pip value for display
+                if (positionSizeUnits > 0) {
+                    pipValue = calculatePipValue(selectedPair, positionSizeUnits);
+                }
+            } else {
+                // Fallback to standard 100k lot
+                positionSizeUnits = positionSizeUnits / 100000;
+            }
         } else if (inputs.assetClass === 'futures') {
             const lotSize = parseFloat(inputs.lotSize) || 1;
             positionSizeUnits = Math.floor(positionSizeUnits / lotSize) * lotSize;
         }
 
         // Calculate Value and Margin based on "Real" units
-        const realUnits = inputs.assetClass === 'forex' ? positionSizeUnits * 100000 : positionSizeUnits;
+        let realUnits = positionSizeUnits;
+        if (inputs.assetClass === 'forex') {
+            const selectedPair = FOREX_PAIRS[inputs.forexPair];
+            realUnits = positionSizeUnits * (selectedPair?.contractSize || 100000);
+        }
 
         const positionSizeValue = realUnits * entry;
         const marginRequired = leverage > 0 ? positionSizeValue / leverage : positionSizeValue;
@@ -207,10 +289,19 @@ export default function Calculator({ locale }: CalculatorProps) {
         let potentialProfit = 0;
         let rrr = 0;
         let futuresMinRisk: number | null = null;
+        let forexMinRisk: number | null = null;
 
         if (inputs.assetClass === 'futures' && positionSizeUnits === 0 && priceDiff > 0) {
             const lotSize = parseFloat(inputs.lotSize) || 1;
             futuresMinRisk = lotSize * priceDiff;
+        }
+
+        if (inputs.assetClass === 'forex' && priceDiff > 0) {
+            const selectedPair = FOREX_PAIRS[inputs.forexPair];
+            const minLot = 0.01;
+            if (positionSizeUnits < minLot && selectedPair) {
+                forexMinRisk = minLot * priceDiff * selectedPair.contractSize;
+            }
         }
 
         if (target > 0 && entry > 0 && direction) {
@@ -235,6 +326,8 @@ export default function Calculator({ locale }: CalculatorProps) {
             validationError,
             insufficientMargin,
             futuresMinRisk,
+            forexMinRisk,
+            pipValue,
             fieldErrors,
             isComplete,
         });
@@ -304,6 +397,9 @@ export default function Calculator({ locale }: CalculatorProps) {
             targetPrice: '',
             leverage: '10',
             lotSize: '50',
+            forexPair: 'EURUSD',
+            stopLossMode: 'price',
+            stopLossPips: '',
         });
         setTouched({});
         setToastExiting(false);
@@ -388,7 +484,7 @@ export default function Calculator({ locale }: CalculatorProps) {
                             }
                             handleInputChange('assetClass', ac);
                             if (ac === 'forex') {
-                                handleInputChange('leverage', '50');
+                                handleInputChange('leverage', '100');
                             } else {
                                 handleInputChange('leverage', '10');
                             }
@@ -501,23 +597,64 @@ export default function Calculator({ locale }: CalculatorProps) {
                             {renderFieldError('entryPrice')}
                         </div>
 
-                        {/* Stop Loss Price */}
+                        {/* Stop Loss Input (Price or Pips) */}
                         <div>
-                            <label className="block text-xs md:text-sm text-gray-400 mb-1">
-                                Stop Loss Price
-                                <span className="text-red-400 ml-0.5">*</span>
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                                <label className="text-xs md:text-sm text-gray-400">
+                                    Stop Loss
+                                    <span className="text-red-400 ml-0.5">*</span>
+                                </label>
+
+                                {/* Stop Loss Mode Toggle (Forex Only) */}
+                                {inputs.assetClass === 'forex' && (
+                                    <div
+                                        className="flex items-center gap-1.5 cursor-pointer"
+                                        onClick={() => {
+                                            const newMode = inputs.stopLossMode === 'price' ? 'pips' : 'price';
+                                            handleInputChange('stopLossMode', newMode);
+                                            // Clear the other field to avoid confusion
+                                            if (newMode === 'pips') handleInputChange('stopLossPrice', '');
+                                            else handleInputChange('stopLossPips', '');
+                                        }}
+                                        role="button"
+                                        tabIndex={inputs.assetClass === 'forex' ? 5 : -1}
+                                    >
+                                        <span className={`text-xs ${inputs.stopLossMode === 'price' ? 'text-emerald-400' : 'text-gray-500'}`}>Price</span>
+                                        <div className={`relative w-10 md:w-12 h-5 md:h-6 rounded-full transition-colors ${inputs.stopLossMode === 'pips' ? 'bg-emerald-500' : 'bg-[#3A3A3A]'}`}>
+                                            <div className={`absolute top-0.5 md:top-1 w-4 h-4 bg-white rounded-full transition-transform flex items-center justify-center text-[8px] md:text-[10px] font-bold text-gray-900 ${inputs.stopLossMode === 'pips' ? 'left-5 md:left-6' : 'left-0.5 md:left-1'}`}>
+                                                {inputs.stopLossMode === 'pips' ? 'P' : '$'}
+                                            </div>
+                                        </div>
+                                        <span className={`text-xs ${inputs.stopLossMode === 'pips' ? 'text-emerald-400' : 'text-gray-500'}`}>Pips</span>
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
-                                <input
-                                    type="number"
-                                    className={getInputClass('stopLossPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
-                                    placeholder="43,500"
-                                    value={inputs.stopLossPrice}
-                                    onChange={(e) => handleInputChange('stopLossPrice', e.target.value)}
-                                    onBlur={() => handleBlur('stopLossPrice')}
-                                    tabIndex={5}
-                                />
+                                {inputs.stopLossMode === 'price' ? (
+                                    <>
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
+                                        <input
+                                            type="number"
+                                            className={getInputClass('stopLossPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
+                                            placeholder="43,500"
+                                            value={inputs.stopLossPrice}
+                                            onChange={(e) => handleInputChange('stopLossPrice', e.target.value)}
+                                            onBlur={() => handleBlur('stopLossPrice')}
+                                            tabIndex={5}
+                                        />
+                                    </>
+                                ) : (
+                                    <input
+                                        type="number"
+                                        className={getInputClass('stopLossPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 text-white text-sm focus:outline-none')}
+                                        placeholder="50"
+                                        value={inputs.stopLossPips}
+                                        onChange={(e) => handleInputChange('stopLossPips', e.target.value)}
+                                        onBlur={() => handleBlur('stopLossPrice')} // Reuse stopLossPrice validation key for simplicity
+                                        tabIndex={5}
+                                    />
+                                )}
                             </div>
                             {renderFieldError('stopLossPrice')}
                         </div>
@@ -542,25 +679,46 @@ export default function Calculator({ locale }: CalculatorProps) {
 
                         {/* Leverage Slider */}
                         <div>
-                            <label className="block text-xs md:text-sm text-gray-400 mb-1">
-                                Leverage: <span className="text-emerald-500 font-semibold">{inputs.leverage}x</span>
-                            </label>
-                            <input
-                                type="range"
-                                min="1"
-                                max="100"
-                                value={inputs.leverage}
-                                onChange={(e) => handleInputChange('leverage', e.target.value)}
-                                className="w-full h-1 bg-[#3A3A3A] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:w-4 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
-                                tabIndex={7}
-                            />
-                            <div className="flex justify-between text-[10px] md:text-xs text-gray-600 mt-0.5">
-                                <span>1x</span>
-                                <span>25x</span>
-                                <span>50x</span>
-                                <span>75x</span>
-                                <span>100x</span>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="block text-xs md:text-sm text-gray-400">
+                                    Leverage: <span className="text-emerald-500 font-semibold">{inputs.leverage}x</span>
+                                </label>
+                                <div className="group relative">
+                                    <svg className="w-3.5 h-3.5 text-gray-500 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                    </svg>
+                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0 bottom-full mb-2 w-48 bg-[#2A2A2A] border border-[#3A3A3A] text-gray-300 text-[10px] rounded p-2 pointer-events-none z-10 shadow-lg">
+                                        Leverage determines your Margin usage. It does NOT affect the calculate Position Size (Lots), which is based on your Risk Amount.
+                                    </div>
+                                </div>
                             </div>
+
+                            {/* Dynamic Max Leverage based on Asset Class */}
+                            {(() => {
+                                const maxLeverage = inputs.assetClass === 'forex' ? 500 :
+                                    inputs.assetClass === 'stocks' ? 50 : 125;
+
+                                return (
+                                    <>
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max={maxLeverage}
+                                            value={inputs.leverage}
+                                            onChange={(e) => handleInputChange('leverage', e.target.value)}
+                                            className="w-full h-1 bg-[#3A3A3A] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:w-4 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
+                                            tabIndex={7}
+                                        />
+                                        <div className="flex justify-between text-[10px] md:text-xs text-gray-600 mt-0.5">
+                                            <span>1x</span>
+                                            <span>{Math.floor(maxLeverage * 0.25)}x</span>
+                                            <span>{Math.floor(maxLeverage * 0.5)}x</span>
+                                            <span>{Math.floor(maxLeverage * 0.75)}x</span>
+                                            <span>{maxLeverage}x</span>
+                                        </div>
+                                    </>
+                                );
+                            })()}
                         </div>
 
                         {/* Lot Size Input (Futures Only) */}
@@ -576,6 +734,45 @@ export default function Calculator({ locale }: CalculatorProps) {
                                         onChange={(e) => handleInputChange('lotSize', e.target.value)}
                                         tabIndex={8}
                                     />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Forex Pair Selector */}
+                        {inputs.assetClass === 'forex' && (
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs md:text-sm text-gray-400 mb-1">
+                                        Currency Pair
+                                    </label>
+                                    <select
+                                        className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 text-white text-sm focus:outline-none focus:border-emerald-500 cursor-pointer"
+                                        value={inputs.forexPair}
+                                        onChange={(e) => handleInputChange('forexPair', e.target.value)}
+                                        tabIndex={8}
+                                    >
+                                        <optgroup label="Major Pairs">
+                                            {Object.values(FOREX_PAIRS).filter(p => p.category === 'major').map((pair) => (
+                                                <option key={pair.symbol} value={pair.symbol}>{pair.displayName}</option>
+                                            ))}
+                                        </optgroup>
+                                        <optgroup label="Minor Pairs">
+                                            {Object.values(FOREX_PAIRS).filter(p => p.category === 'minor').map((pair) => (
+                                                <option key={pair.symbol} value={pair.symbol}>{pair.displayName}</option>
+                                            ))}
+                                        </optgroup>
+                                        <optgroup label="Commodities">
+                                            {Object.values(FOREX_PAIRS).filter(p => p.category === 'commodity').map((pair) => (
+                                                <option key={pair.symbol} value={pair.symbol}>{pair.displayName}</option>
+                                            ))}
+                                        </optgroup>
+                                    </select>
+                                    {FOREX_PAIRS[inputs.forexPair] && (
+                                        <div className="text-[10px] text-gray-600 mt-1 flex justify-between">
+                                            <span>Pip Size: {FOREX_PAIRS[inputs.forexPair].pipSize}</span>
+                                            <span>Contract: {FOREX_PAIRS[inputs.forexPair].contractSize.toLocaleString()} units</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -610,11 +807,11 @@ export default function Calculator({ locale }: CalculatorProps) {
 
                     {/* Hero: Position Size */}
                     <div className="text-center py-4 md:py-5 px-3">
-                        {outputs.futuresMinRisk ? (
+                        {outputs.futuresMinRisk || outputs.forexMinRisk ? (
                             <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
                                 <div className="text-red-400 text-sm font-semibold mb-1">Insufficient Risk</div>
                                 <div className="text-xs text-red-300">
-                                    To trade 1 Lot, you must risk at least <span className="font-bold">{formatCurrency(outputs.futuresMinRisk)}</span>.
+                                    To trade 0.01 Lot, you must risk at least <span className="font-bold">{formatCurrency(outputs.futuresMinRisk || outputs.forexMinRisk || 0)}</span>.
                                     <br />
                                     Increase your Risk % or widen your Stop Loss.
                                 </div>
@@ -652,6 +849,12 @@ export default function Calculator({ locale }: CalculatorProps) {
                                 <div className="text-xs text-gray-500 mt-1">
                                     {formatCurrency(outputs.positionSizeValue)} total value
                                 </div>
+                                {/* Pip Value Display for Forex */}
+                                {inputs.assetClass === 'forex' && outputs.pipValue && (
+                                    <div className="text-xs text-emerald-400 mt-1">
+                                        1 pip = {formatCurrency(outputs.pipValue)}
+                                    </div>
+                                )}
                             </>
                         )}
                     </div>
