@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber, getCurrencySymbol, SupportedLocale } from '@/lib/formatters';
 import { trackAssetClassSwitch, trackRiskModeToggle, trackFormReset, trackResetUndo, trackCalculation } from '@/lib/analytics';
 import { FOREX_PAIRS, ForexPair, calculatePipValue } from '@/lib/forexPairs';
+import { calculateIndiaCharges, getIndiaLeverage, calculateMaxMarginQty, IndiaCharges, IndiaTradeMode } from '@/lib/indiaCharges';
 
 type TradeDirection = 'LONG' | 'SHORT';
 type RiskMode = 'percent' | 'fiat';
 type AssetClass = 'crypto' | 'stocks' | 'forex' | 'futures';
 type StopLossMode = 'price' | 'pips';
+type StockMarket = 'global' | 'india';
 
 interface CalculatorInputs {
     assetClass: AssetClass;
@@ -25,6 +27,26 @@ interface CalculatorInputs {
     forexPair: string;
     stopLossMode: StopLossMode;
     stopLossPips: string;
+    // Indian Stocks-specific
+    stockMarket: StockMarket;
+    indiaTradeMode: IndiaTradeMode;
+    // Multiple Targets (Staged Exit)
+    useMultipleTargets: boolean;
+    target1: string;      // T1 price
+    target2: string;      // T2 price
+    target3: string;      // T3 price
+    allocation1: string;  // % of qty to exit at T1 (default 50%)
+    allocation2: string;  // % of qty to exit at T2 (default 30%)
+    allocation3: string;  // % of qty to exit at T3 (default 20%)
+}
+
+// Staged Exit calculation result
+interface StagedExitResult {
+    target: number;
+    allocation: number;   // % allocation
+    quantity: number;     // shares for this target
+    profit: number;       // profit at this target
+    rrr: number;          // R:R for this target
 }
 
 interface FieldErrors {
@@ -50,6 +72,14 @@ interface CalculatorOutputs {
     pipValue: number | null;
     fieldErrors: FieldErrors;
     isComplete: boolean;
+    // Indian Stocks-specific
+    marginLimited: boolean;
+    maxMarginQty: number;
+    riskBasedQty: number;
+    indiaCharges: IndiaCharges | null;
+    // Multiple Targets
+    stagedExits: StagedExitResult[];
+    totalStagedProfit: number;
 }
 
 const STORAGE_KEY = 'riskrewardcalc_balance';
@@ -65,7 +95,7 @@ interface CalculatorProps {
 export default function Calculator({ locale, defaultAssetClass, defaultForexPair, defaultEntryPrice, forceUpdateId }: CalculatorProps) {
     // Calculator State Initialization
     const [inputs, setInputs] = useState<CalculatorInputs>({
-        assetClass: defaultAssetClass || 'crypto',
+        assetClass: defaultAssetClass || 'forex',
         balance: '',
         riskMode: 'percent',
         riskPercent: '1',
@@ -73,12 +103,23 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
         entryPrice: defaultEntryPrice || '',
         stopLossPrice: '',
         targetPrice: '',
-        leverage: defaultAssetClass === 'forex' ? '100' : '10',
+        leverage: defaultAssetClass && defaultAssetClass !== 'forex' ? '10' : '100',
         lotSize: '50',
         // Forex-specific
         forexPair: defaultForexPair || 'EURUSD',
         stopLossMode: 'price',
         stopLossPips: '',
+        // Indian Stocks-specific
+        stockMarket: 'global',
+        indiaTradeMode: 'intraday',
+        // Multiple Targets (Staged Exit)
+        useMultipleTargets: false,
+        target1: '',
+        target2: '',
+        target3: '',
+        allocation1: '50',
+        allocation2: '30',
+        allocation3: '20',
     });
 
     // Update entry price when defaultEntryPrice changes (from live price)
@@ -103,6 +144,14 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
         pipValue: null,
         fieldErrors: {},
         isComplete: false,
+        // Indian Stocks-specific
+        marginLimited: false,
+        maxMarginQty: 0,
+        riskBasedQty: 0,
+        indiaCharges: null,
+        // Multiple Targets
+        stagedExits: [],
+        totalStagedProfit: 0,
     });
 
     // Track which fields have been touched for validation
@@ -250,9 +299,32 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
         let positionSizeUnits = priceDiff > 0 ? riskAmount / priceDiff : 0;
         let pipValue: number | null = null;
 
+        // Indian Stocks-specific variables
+        let marginLimited = false;
+        let maxMarginQty = 0;
+        let riskBasedQty = 0;
+        let indiaCharges: IndiaCharges | null = null;
+        let effectiveLeverage = leverage;
+
         // Apply Asset Class Logic
         if (inputs.assetClass === 'stocks') {
-            positionSizeUnits = Math.floor(positionSizeUnits);
+            riskBasedQty = Math.floor(positionSizeUnits);
+
+            if (inputs.stockMarket === 'india') {
+                // Indian Stocks: Use SEBI-mandated fixed leverage
+                effectiveLeverage = getIndiaLeverage(inputs.indiaTradeMode);
+
+                // Calculate margin-based quantity limit
+                maxMarginQty = calculateMaxMarginQty(balance, entry, inputs.indiaTradeMode);
+
+                // Final quantity is the MINIMUM of risk-based and margin-based
+                positionSizeUnits = Math.min(riskBasedQty, maxMarginQty);
+                marginLimited = maxMarginQty < riskBasedQty && maxMarginQty > 0;
+            } else {
+                // Global stocks: just use risk-based calculation
+                positionSizeUnits = riskBasedQty;
+                maxMarginQty = riskBasedQty; // No margin limit for global
+            }
         } else if (inputs.assetClass === 'forex') {
             // Get the selected forex pair configuration
             const selectedPair = FOREX_PAIRS[inputs.forexPair];
@@ -284,7 +356,12 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
         }
 
         const positionSizeValue = realUnits * entry;
-        const marginRequired = leverage > 0 ? positionSizeValue / leverage : positionSizeValue;
+
+        // For Indian stocks, use the effective leverage (fixed by SEBI)
+        const marginLeverage = inputs.assetClass === 'stocks' && inputs.stockMarket === 'india'
+            ? effectiveLeverage
+            : leverage;
+        const marginRequired = marginLeverage > 0 ? positionSizeValue / marginLeverage : positionSizeValue;
 
         let potentialProfit = 0;
         let rrr = 0;
@@ -313,6 +390,49 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
             rrr = riskAmount > 0 ? potentialProfit / riskAmount : 0;
         }
 
+        // Calculate Indian charges if applicable
+        if (inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && positionSizeUnits > 0 && target > 0) {
+            indiaCharges = calculateIndiaCharges(entry, target, positionSizeUnits, inputs.indiaTradeMode);
+        }
+
+        // Calculate Staged Exits (Multiple Targets)
+        let stagedExits: StagedExitResult[] = [];
+        let totalStagedProfit = 0;
+
+        if (inputs.useMultipleTargets && positionSizeUnits > 0 && entry > 0 && riskAmount > 0 && direction) {
+            const targets = [
+                { price: parseFloat(inputs.target1) || 0, allocation: parseFloat(inputs.allocation1) || 0 },
+                { price: parseFloat(inputs.target2) || 0, allocation: parseFloat(inputs.allocation2) || 0 },
+                { price: parseFloat(inputs.target3) || 0, allocation: parseFloat(inputs.allocation3) || 0 },
+            ];
+
+            for (const t of targets) {
+                if (t.price > 0 && t.allocation > 0) {
+                    const qty = Math.floor(positionSizeUnits * (t.allocation / 100));
+                    let profit = 0;
+
+                    if (direction === 'LONG') {
+                        profit = (t.price - entry) * qty;
+                    } else {
+                        profit = (entry - t.price) * qty;
+                    }
+
+                    // Calculate R:R for this target
+                    const targetRRR = riskAmount > 0 ? (profit / riskAmount) : 0;
+
+                    stagedExits.push({
+                        target: t.price,
+                        allocation: t.allocation,
+                        quantity: qty,
+                        profit: profit,
+                        rrr: targetRRR,
+                    });
+
+                    totalStagedProfit += profit;
+                }
+            }
+        }
+
         const insufficientMargin = marginRequired > balance && balance > 0 && marginRequired > 0;
 
         setOutputs({
@@ -330,6 +450,14 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
             pipValue,
             fieldErrors,
             isComplete,
+            // Indian Stocks-specific
+            marginLimited,
+            maxMarginQty,
+            riskBasedQty,
+            indiaCharges,
+            // Multiple Targets
+            stagedExits,
+            totalStagedProfit,
         });
     }, [inputs, touched]);
 
@@ -357,7 +485,12 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
     }, [outputs.isComplete, outputs.tradeDirection, inputs.assetClass, inputs.leverage, inputs.targetPrice]);
 
     const handleInputChange = (field: keyof CalculatorInputs, value: string) => {
-        setInputs(prev => ({ ...prev, [field]: value }));
+        // Handle boolean fields
+        if (field === 'useMultipleTargets') {
+            setInputs(prev => ({ ...prev, [field]: value === 'true' }));
+        } else {
+            setInputs(prev => ({ ...prev, [field]: value }));
+        }
     };
 
     const handleBlur = (field: string) => {
@@ -400,6 +533,16 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
             forexPair: 'EURUSD',
             stopLossMode: 'price',
             stopLossPips: '',
+            stockMarket: inputs.stockMarket,
+            indiaTradeMode: 'intraday',
+            // Multiple Targets
+            useMultipleTargets: false,
+            target1: '',
+            target2: '',
+            target3: '',
+            allocation1: '50',
+            allocation2: '30',
+            allocation3: '20',
         });
         setTouched({});
         setToastExiting(false);
@@ -475,7 +618,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
 
             {/* Asset Class Selector */}
             <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg p-1.5 mb-4 flex gap-1">
-                {(['crypto', 'stocks', 'forex', 'futures'] as AssetClass[]).map((ac) => (
+                {(['forex', 'stocks', 'crypto', 'futures'] as AssetClass[]).map((ac) => (
                     <button
                         key={ac}
                         onClick={() => {
@@ -498,6 +641,79 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                     </button>
                 ))}
             </div>
+
+            {/* Market Region Selector (Stocks Only) */}
+            {inputs.assetClass === 'stocks' && (
+                <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg p-3 mb-4">
+                    <label className="block text-xs md:text-sm text-gray-400 mb-2">
+                        Market Region
+                    </label>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => handleInputChange('stockMarket', 'global')}
+                            className={`flex-1 py-2 px-3 rounded-md text-xs md:text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${inputs.stockMarket === 'global'
+                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
+                                : 'bg-[#0D0D0D] text-gray-400 border border-[#3A3A3A] hover:border-gray-500'
+                                }`}
+                        >
+                            <span>🌍</span>
+                            <span>Global</span>
+                        </button>
+                        <button
+                            onClick={() => handleInputChange('stockMarket', 'india')}
+                            className={`flex-1 py-2 px-3 rounded-md text-xs md:text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${inputs.stockMarket === 'india'
+                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
+                                : 'bg-[#0D0D0D] text-gray-400 border border-[#3A3A3A] hover:border-gray-500'
+                                }`}
+                        >
+                            <span>🇮🇳</span>
+                            <span>India (NSE)</span>
+                        </button>
+                    </div>
+                    {inputs.stockMarket === 'india' && (
+                        <p className="text-[10px] text-gray-500 mt-1.5">
+                            SEBI regulated • Fixed leverage based on trade mode
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* Trade Mode Selector (Indian Stocks Only) */}
+            {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && (
+                <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg p-3 mb-4">
+                    <label className="block text-xs md:text-sm text-gray-400 mb-2">
+                        Trade Mode
+                    </label>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => handleInputChange('indiaTradeMode', 'intraday')}
+                            className={`flex-1 py-2.5 px-3 rounded-md text-xs md:text-sm font-medium transition-colors ${inputs.indiaTradeMode === 'intraday'
+                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
+                                : 'bg-[#0D0D0D] text-gray-400 border border-[#3A3A3A] hover:border-gray-500'
+                                }`}
+                        >
+                            <div className="flex items-center justify-center gap-1.5 mb-0.5">
+                                <span>⚡</span>
+                                <span>Intraday (MIS)</span>
+                            </div>
+                            <div className="text-[10px] text-gray-500">5x Leverage</div>
+                        </button>
+                        <button
+                            onClick={() => handleInputChange('indiaTradeMode', 'delivery')}
+                            className={`flex-1 py-2.5 px-3 rounded-md text-xs md:text-sm font-medium transition-colors ${inputs.indiaTradeMode === 'delivery'
+                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
+                                : 'bg-[#0D0D0D] text-gray-400 border border-[#3A3A3A] hover:border-gray-500'
+                                }`}
+                        >
+                            <div className="flex items-center justify-center gap-1.5 mb-0.5">
+                                <span>📦</span>
+                                <span>Delivery (CNC)</span>
+                            </div>
+                            <div className="text-[10px] text-gray-500">No Leverage</div>
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Two Column Layout - Fluid Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
@@ -569,6 +785,12 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                 tabIndex={3}
                             />
                             {renderFieldError(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat')}
+                            {/* Max Risk Amount Display for Indian Stocks */}
+                            {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && inputs.balance && parseFloat(inputs.riskPercent) > 0 && (
+                                <div className="mt-1.5 text-[10px] md:text-xs text-emerald-400/80">
+                                    💰 Your {inputs.riskPercent}% = {formatCurrency(parseFloat(inputs.balance) * parseFloat(inputs.riskPercent) / 100)} max risk
+                                </div>
+                            )}
                         </div>
 
                         {/* Entry Price */}
@@ -661,65 +883,193 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
 
                         {/* Target Price */}
                         <div>
-                            <label className="block text-xs md:text-sm text-gray-400 mb-1">
-                                Target Price <span className="text-gray-600">(Optional)</span>
-                            </label>
-                            <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
-                                <input
-                                    type="number"
-                                    className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
-                                    placeholder="50,000"
-                                    value={inputs.targetPrice}
-                                    onChange={(e) => handleInputChange('targetPrice', e.target.value)}
-                                    tabIndex={6}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Leverage Slider */}
-                        <div>
-                            <div className="flex justify-between items-center mb-1">
-                                <label className="block text-xs md:text-sm text-gray-400">
-                                    Leverage: <span className="text-emerald-500 font-semibold">{inputs.leverage}x</span>
+                            <div className="flex items-center justify-between mb-1">
+                                <label className="text-xs md:text-sm text-gray-400">
+                                    Target Price <span className="text-gray-600">(Optional)</span>
                                 </label>
-                                <div className="group relative">
-                                    <svg className="w-3.5 h-3.5 text-gray-500 cursor-help" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                    </svg>
-                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0 bottom-full mb-2 w-48 bg-[#2A2A2A] border border-[#3A3A3A] text-gray-300 text-[10px] rounded p-2 pointer-events-none z-10 shadow-lg">
-                                        Leverage determines your Margin usage. It does NOT affect the calculate Position Size (Lots), which is based on your Risk Amount.
+                                {/* Multiple Targets Toggle */}
+                                <div
+                                    className="flex items-center gap-1.5 cursor-pointer"
+                                    onClick={() => handleInputChange('useMultipleTargets', (!inputs.useMultipleTargets).toString())}
+                                    role="button"
+                                    tabIndex={0}
+                                >
+                                    <span className={`text-[10px] ${inputs.useMultipleTargets ? 'text-emerald-400' : 'text-gray-500'}`}>
+                                        Multi-Target
+                                    </span>
+                                    <div className={`relative w-8 h-4 rounded-full transition-colors ${inputs.useMultipleTargets ? 'bg-emerald-500' : 'bg-[#3A3A3A]'}`}>
+                                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${inputs.useMultipleTargets ? 'left-4' : 'left-0.5'}`} />
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Dynamic Max Leverage based on Asset Class */}
-                            {(() => {
-                                const maxLeverage = inputs.assetClass === 'forex' ? 500 :
-                                    inputs.assetClass === 'stocks' ? 50 : 125;
-
-                                return (
-                                    <>
-                                        <input
-                                            type="range"
-                                            min="1"
-                                            max={maxLeverage}
-                                            value={inputs.leverage}
-                                            onChange={(e) => handleInputChange('leverage', e.target.value)}
-                                            className="w-full h-1 bg-[#3A3A3A] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:w-4 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
-                                            tabIndex={7}
-                                        />
-                                        <div className="flex justify-between text-[10px] md:text-xs text-gray-600 mt-0.5">
-                                            <span>1x</span>
-                                            <span>{Math.floor(maxLeverage * 0.25)}x</span>
-                                            <span>{Math.floor(maxLeverage * 0.5)}x</span>
-                                            <span>{Math.floor(maxLeverage * 0.75)}x</span>
-                                            <span>{maxLeverage}x</span>
+                            {!inputs.useMultipleTargets ? (
+                                /* Single Target Mode */
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
+                                    <input
+                                        type="number"
+                                        className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
+                                        placeholder="50,000"
+                                        value={inputs.targetPrice}
+                                        onChange={(e) => handleInputChange('targetPrice', e.target.value)}
+                                        tabIndex={6}
+                                    />
+                                </div>
+                            ) : (
+                                /* Multiple Targets Mode */
+                                <div className="space-y-2">
+                                    {/* T1 */}
+                                    <div className="flex gap-2">
+                                        <div className="flex-1 relative">
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-emerald-400 text-[10px] font-semibold">T1</span>
+                                            <input
+                                                type="number"
+                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
+                                                placeholder="Price"
+                                                value={inputs.target1}
+                                                onChange={(e) => handleInputChange('target1', e.target.value)}
+                                            />
                                         </div>
-                                    </>
-                                );
-                            })()}
+                                        <div className="w-16 relative">
+                                            <input
+                                                type="number"
+                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-2 pr-5 text-white text-sm text-center focus:outline-none focus:border-emerald-500"
+                                                value={inputs.allocation1}
+                                                onChange={(e) => handleInputChange('allocation1', e.target.value)}
+                                                max={100}
+                                                min={0}
+                                            />
+                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
+                                        </div>
+                                    </div>
+
+                                    {/* T2 */}
+                                    <div className="flex gap-2">
+                                        <div className="flex-1 relative">
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-blue-400 text-[10px] font-semibold">T2</span>
+                                            <input
+                                                type="number"
+                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
+                                                placeholder="Price"
+                                                value={inputs.target2}
+                                                onChange={(e) => handleInputChange('target2', e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="w-16 relative">
+                                            <input
+                                                type="number"
+                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-2 pr-5 text-white text-sm text-center focus:outline-none focus:border-emerald-500"
+                                                value={inputs.allocation2}
+                                                onChange={(e) => handleInputChange('allocation2', e.target.value)}
+                                                max={100}
+                                                min={0}
+                                            />
+                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
+                                        </div>
+                                    </div>
+
+                                    {/* T3 */}
+                                    <div className="flex gap-2">
+                                        <div className="flex-1 relative">
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-purple-400 text-[10px] font-semibold">T3</span>
+                                            <input
+                                                type="number"
+                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
+                                                placeholder="Price"
+                                                value={inputs.target3}
+                                                onChange={(e) => handleInputChange('target3', e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="w-16 relative">
+                                            <input
+                                                type="number"
+                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-2 pr-5 text-white text-sm text-center focus:outline-none focus:border-emerald-500"
+                                                value={inputs.allocation3}
+                                                onChange={(e) => handleInputChange('allocation3', e.target.value)}
+                                                max={100}
+                                                min={0}
+                                            />
+                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Allocation Total Indicator */}
+                                    {(() => {
+                                        const total = (parseFloat(inputs.allocation1) || 0) + (parseFloat(inputs.allocation2) || 0) + (parseFloat(inputs.allocation3) || 0);
+                                        const isValid = total === 100;
+                                        return (
+                                            <div className={`text-[10px] text-right ${isValid ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                                Total: {total}% {!isValid && '(should be 100%)'}
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
                         </div>
+
+                        {/* Leverage Slider - Hide for Indian Stocks */}
+                        {!(inputs.assetClass === 'stocks' && inputs.stockMarket === 'india') && (
+                            <div>
+                                <div className="flex justify-between items-center mb-1">
+                                    <label className="block text-xs md:text-sm text-gray-400">
+                                        Leverage: <span className="text-emerald-500 font-semibold">{inputs.leverage}x</span>
+                                    </label>
+                                    <div className="group relative">
+                                        <svg className="w-3.5 h-3.5 text-gray-500 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                        </svg>
+                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0 bottom-full mb-2 w-48 bg-[#2A2A2A] border border-[#3A3A3A] text-gray-300 text-[10px] rounded p-2 pointer-events-none z-10 shadow-lg">
+                                            Leverage determines your Margin usage. It does NOT affect the calculate Position Size (Lots), which is based on your Risk Amount.
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Dynamic Max Leverage based on Asset Class */}
+                                {(() => {
+                                    const maxLeverage = inputs.assetClass === 'forex' ? 500 :
+                                        inputs.assetClass === 'stocks' ? 50 : 125;
+
+                                    return (
+                                        <>
+                                            <input
+                                                type="range"
+                                                min="1"
+                                                max={maxLeverage}
+                                                value={inputs.leverage}
+                                                onChange={(e) => handleInputChange('leverage', e.target.value)}
+                                                className="w-full h-1 bg-[#3A3A3A] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:w-4 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
+                                                tabIndex={7}
+                                            />
+                                            <div className="flex justify-between text-[10px] md:text-xs text-gray-600 mt-0.5">
+                                                <span>1x</span>
+                                                <span>{Math.floor(maxLeverage * 0.25)}x</span>
+                                                <span>{Math.floor(maxLeverage * 0.5)}x</span>
+                                                <span>{Math.floor(maxLeverage * 0.75)}x</span>
+                                                <span>{maxLeverage}x</span>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        )}
+
+                        {/* Fixed Leverage Indicator for Indian Stocks */}
+                        {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && (
+                            <div className="bg-[#0D0D0D] border border-[#3A3A3A] rounded-lg p-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs md:text-sm text-gray-400">Leverage (SEBI Fixed)</span>
+                                    <span className="text-emerald-500 font-semibold text-sm md:text-base">
+                                        {inputs.indiaTradeMode === 'intraday' ? '5x' : '1x'}
+                                    </span>
+                                </div>
+                                <p className="text-[10px] text-gray-500 mt-1">
+                                    {inputs.indiaTradeMode === 'intraday'
+                                        ? 'Peak margin rules limit intraday leverage to 5x'
+                                        : 'Delivery trades require full payment (no leverage)'}
+                                </p>
+                            </div>
+                        )}
 
                         {/* Lot Size Input (Futures Only) */}
                         {inputs.assetClass === 'futures' && (
@@ -770,7 +1120,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                     {FOREX_PAIRS[inputs.forexPair] && (
                                         <div className="text-[10px] text-gray-600 mt-1 flex justify-between">
                                             <span>Pip Size: {FOREX_PAIRS[inputs.forexPair].pipSize}</span>
-                                            <span>Contract: {FOREX_PAIRS[inputs.forexPair].contractSize.toLocaleString()} units</span>
+                                            <span>Contract: {FOREX_PAIRS[inputs.forexPair].contractSize.toLocaleString('en-US')} units</span>
                                         </div>
                                     )}
                                 </div>
@@ -855,6 +1205,20 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                         1 pip = {formatCurrency(outputs.pipValue)}
                                     </div>
                                 )}
+                                {/* Margin Limited Warning for Indian Stocks */}
+                                {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && outputs.marginLimited && (
+                                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-md py-2 px-3 mt-2 text-left">
+                                        <div className="text-amber-400 text-[10px] md:text-xs flex items-center gap-1">
+                                            <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                            </svg>
+                                            <span>Margin Limited</span>
+                                        </div>
+                                        <p className="text-[10px] text-amber-300/70 mt-1">
+                                            Risk suggests {formatNumber(outputs.riskBasedQty, 0)} shares, but margin limits you to {formatNumber(outputs.maxMarginQty, 0)}.
+                                        </p>
+                                    </div>
+                                )}
                             </>
                         )}
                     </div>
@@ -909,11 +1273,123 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                         </div>
 
                         {/* Helper text for RRR when target not entered but other fields are complete */}
-                        {outputs.isComplete && !inputs.targetPrice && (
+                        {outputs.isComplete && !inputs.targetPrice && !inputs.useMultipleTargets && (
                             <div className="px-3 md:px-4 py-2 bg-[#0D0D0D] border-t border-[#2A2A2A]">
                                 <span className="text-gray-500 text-[10px] md:text-xs">
                                     💡 Enter Target Price to see Risk:Reward ratio
                                 </span>
+                            </div>
+                        )}
+
+                        {/* Staged Exit Summary (Multiple Targets) */}
+                        {inputs.useMultipleTargets && outputs.stagedExits.length > 0 && outputs.isComplete && (
+                            <div className="border-t border-[#2A2A2A]">
+                                <div className="px-3 md:px-4 py-2 bg-[#0D0D0D]">
+                                    <div className="text-xs md:text-sm text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+                                        <span>🎯</span>
+                                        <span>Staged Exit Summary</span>
+                                    </div>
+
+                                    {/* Target Breakdown */}
+                                    <div className="space-y-1.5 text-[10px] md:text-xs">
+                                        {outputs.stagedExits.map((exit, index) => {
+                                            const colors = ['text-emerald-400', 'text-blue-400', 'text-purple-400'];
+                                            const labels = ['T1', 'T2', 'T3'];
+                                            return (
+                                                <div key={index} className="flex justify-between items-center text-gray-400">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`font-semibold ${colors[index]}`}>{labels[index]}</span>
+                                                        <span className="text-gray-500">
+                                                            {formatCurrency(exit.target)} × {exit.quantity} ({exit.allocation}%)
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={exit.profit > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                                            {formatCurrency(exit.profit)}
+                                                        </span>
+                                                        <span className="text-gray-600 text-[9px]">
+                                                            1:{exit.rrr.toFixed(1)}R
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+
+                                        {/* Total Staged Profit */}
+                                        <div className="flex justify-between text-gray-300 font-medium pt-1.5 border-t border-[#2A2A2A] mt-1.5">
+                                            <span>Total Staged Profit</span>
+                                            <span className={outputs.totalStagedProfit > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                                {formatCurrency(outputs.totalStagedProfit)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Indian Stocks - Estimated Charges Section */}
+                        {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && outputs.indiaCharges && outputs.isComplete && (
+                            <div className="border-t border-[#2A2A2A]">
+                                <div className="px-3 md:px-4 py-2 bg-[#0D0D0D]">
+                                    <div className="text-xs md:text-sm text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+                                        <span>📊</span>
+                                        <span>Estimated Charges (India)</span>
+                                    </div>
+
+                                    {/* Charge Breakdown */}
+                                    <div className="space-y-1 text-[10px] md:text-xs">
+                                        <div className="flex justify-between text-gray-500">
+                                            <span>STT</span>
+                                            <span>₹{outputs.indiaCharges.stt.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-500">
+                                            <span>Exchange + SEBI</span>
+                                            <span>₹{(outputs.indiaCharges.exchangeCharges + outputs.indiaCharges.sebiTurnover).toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-500">
+                                            <span>Stamp Duty</span>
+                                            <span>₹{outputs.indiaCharges.stampDuty.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-500">
+                                            <span>Brokerage</span>
+                                            <span>₹{outputs.indiaCharges.brokerage.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-500">
+                                            <span>GST (18%)</span>
+                                            <span>₹{outputs.indiaCharges.gst.toFixed(2)}</span>
+                                        </div>
+
+                                        {/* Total */}
+                                        <div className="flex justify-between text-gray-300 font-medium pt-1 border-t border-[#2A2A2A] mt-1">
+                                            <span>Total Charges</span>
+                                            <span className="text-amber-400">₹{outputs.indiaCharges.totalCharges.toFixed(2)}</span>
+                                        </div>
+
+                                        {/* Breakeven */}
+                                        <div className="flex justify-between text-gray-500">
+                                            <span>Breakeven Movement</span>
+                                            <span>₹{outputs.indiaCharges.breakeven.toFixed(2)}/share</span>
+                                        </div>
+
+                                        {/* STCG Tax Provision */}
+                                        {outputs.potentialProfit > 0 && outputs.indiaCharges.stcgProvision > 0 && (
+                                            <div className="flex justify-between text-gray-500 pt-1 border-t border-[#2A2A2A] mt-1">
+                                                <span>STCG Tax ({inputs.indiaTradeMode === 'intraday' ? '15%' : '20%'})</span>
+                                                <span className="text-red-400">₹{outputs.indiaCharges.stcgProvision.toFixed(2)}</span>
+                                            </div>
+                                        )}
+
+                                        {/* Final Net Profit After Tax */}
+                                        {outputs.potentialProfit > 0 && (
+                                            <div className="flex justify-between text-gray-300 font-medium pt-1 border-t border-[#2A2A2A] mt-1">
+                                                <span>🏦 Net Profit (After Tax)</span>
+                                                <span className={outputs.indiaCharges.netProfitAfterTax > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                                    ₹{outputs.indiaCharges.netProfitAfterTax.toFixed(2)}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>
