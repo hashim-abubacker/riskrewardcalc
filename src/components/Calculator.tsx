@@ -5,6 +5,7 @@ import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber,
 import { trackAssetClassSwitch, trackRiskModeToggle, trackFormReset, trackResetUndo, trackCalculation } from '@/lib/analytics';
 import { FOREX_PAIRS, ForexPair, calculatePipValue } from '@/lib/forexPairs';
 import { calculateIndiaCharges, getIndiaLeverage, calculateMaxMarginQty, IndiaCharges, IndiaTradeMode } from '@/lib/indiaCharges';
+import { EXCHANGE_PRESETS, DEFAULT_EXCHANGE, getPreset, feeToPercent, percentToFee, OrderType } from '@/lib/exchangePresets';
 
 type TradeDirection = 'LONG' | 'SHORT';
 type RiskMode = 'percent' | 'fiat';
@@ -38,6 +39,13 @@ interface CalculatorInputs {
     allocation1: string;  // % of qty to exit at T1 (default 50%)
     allocation2: string;  // % of qty to exit at T2 (default 30%)
     allocation3: string;  // % of qty to exit at T3 (default 20%)
+    // Fee Settings (Crypto/Futures)
+    includeFees: boolean;
+    exchange: string;
+    entryOrderType: OrderType;
+    exitOrderType: OrderType;
+    makerFeePercent: string;  // displayed as percentage e.g. "0.020"
+    takerFeePercent: string;  // displayed as percentage e.g. "0.045"
 }
 
 // Staged Exit calculation result
@@ -80,6 +88,14 @@ interface CalculatorOutputs {
     // Multiple Targets
     stagedExits: StagedExitResult[];
     totalStagedProfit: number;
+    // Fee Calculations
+    entryFee: number;
+    exitFee: number;
+    totalFee: number;
+    realRisk: number;
+    breakEvenPrice: number;
+    adjustedProfit: number;
+    adjustedRRR: number;
 }
 
 const STORAGE_KEY = 'riskrewardcalc_balance';
@@ -120,6 +136,13 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
         allocation1: '50',
         allocation2: '30',
         allocation3: '20',
+        // Fee Settings
+        includeFees: false,
+        exchange: DEFAULT_EXCHANGE,
+        entryOrderType: 'taker',
+        exitOrderType: 'taker',
+        makerFeePercent: feeToPercent(getPreset(DEFAULT_EXCHANGE)!.makerFee),
+        takerFeePercent: feeToPercent(getPreset(DEFAULT_EXCHANGE)!.takerFee),
     });
 
     // Update entry price when defaultEntryPrice changes (from live price)
@@ -152,6 +175,14 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
         // Multiple Targets
         stagedExits: [],
         totalStagedProfit: 0,
+        // Fee Calculations
+        entryFee: 0,
+        exitFee: 0,
+        totalFee: 0,
+        realRisk: 0,
+        breakEvenPrice: 0,
+        adjustedProfit: 0,
+        adjustedRRR: 0,
     });
 
     // Track which fields have been touched for validation
@@ -390,6 +421,43 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
             rrr = riskAmount > 0 ? potentialProfit / riskAmount : 0;
         }
 
+        // Fee Calculations (Crypto & Futures only)
+        let entryFee = 0;
+        let exitFee = 0;
+        let totalFee = 0;
+        let realRisk = riskAmount;
+        let breakEvenPrice = 0;
+        let adjustedProfit = potentialProfit;
+        let adjustedRRR = rrr;
+
+        const showFees = inputs.includeFees && (inputs.assetClass === 'crypto' || inputs.assetClass === 'futures');
+        if (showFees && positionSizeValue > 0) {
+            const makerFee = percentToFee(inputs.makerFeePercent);
+            const takerFee = percentToFee(inputs.takerFeePercent);
+            const entryFeeRate = inputs.entryOrderType === 'maker' ? makerFee : takerFee;
+            const exitFeeRate = inputs.exitOrderType === 'maker' ? makerFee : takerFee;
+
+            entryFee = positionSizeValue * entryFeeRate;
+            exitFee = positionSizeValue * exitFeeRate;
+            totalFee = entryFee + exitFee;
+            realRisk = riskAmount + totalFee;
+
+            // Break-even price
+            if (entry > 0 && direction) {
+                if (direction === 'LONG') {
+                    breakEvenPrice = entry * (1 + entryFeeRate + exitFeeRate);
+                } else {
+                    breakEvenPrice = entry * (1 - entryFeeRate - exitFeeRate);
+                }
+            }
+
+            // Adjusted profit and R:R
+            if (potentialProfit !== 0) {
+                adjustedProfit = potentialProfit - totalFee;
+                adjustedRRR = riskAmount > 0 ? adjustedProfit / riskAmount : 0;
+            }
+        }
+
         // Calculate Indian charges if applicable
         if (inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && positionSizeUnits > 0 && target > 0) {
             indiaCharges = calculateIndiaCharges(entry, target, positionSizeUnits, inputs.indiaTradeMode);
@@ -458,6 +526,14 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
             // Multiple Targets
             stagedExits,
             totalStagedProfit,
+            // Fee Calculations
+            entryFee,
+            exitFee,
+            totalFee,
+            realRisk,
+            breakEvenPrice,
+            adjustedProfit,
+            adjustedRRR,
         });
     }, [inputs, touched]);
 
@@ -486,7 +562,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
 
     const handleInputChange = (field: keyof CalculatorInputs, value: string) => {
         // Handle boolean fields
-        if (field === 'useMultipleTargets') {
+        if (field === 'useMultipleTargets' || field === 'includeFees') {
             setInputs(prev => ({ ...prev, [field]: value === 'true' }));
         } else {
             setInputs(prev => ({ ...prev, [field]: value }));
@@ -543,6 +619,13 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
             allocation1: '50',
             allocation2: '30',
             allocation3: '20',
+            // Fee Settings
+            includeFees: false,
+            exchange: DEFAULT_EXCHANGE,
+            entryOrderType: 'taker',
+            exitOrderType: 'taker',
+            makerFeePercent: feeToPercent(getPreset(DEFAULT_EXCHANGE)!.makerFee),
+            takerFeePercent: feeToPercent(getPreset(DEFAULT_EXCHANGE)!.takerFee),
         });
         setTouched({});
         setToastExiting(false);
@@ -1071,6 +1154,140 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                             </div>
                         )}
 
+                        {/* Fee Settings (Crypto & Futures Only) */}
+                        {(inputs.assetClass === 'crypto' || inputs.assetClass === 'futures') && (
+                            <div className="bg-[#0D0D0D] border border-[#3A3A3A] rounded-lg p-3 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs md:text-sm text-gray-400 font-medium">Fee Settings</span>
+                                        <div className="group relative">
+                                            <svg className="w-3.5 h-3.5 text-gray-500 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                            </svg>
+                                            <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0 bottom-full mb-2 w-52 bg-[#2A2A2A] border border-[#3A3A3A] text-gray-300 text-[10px] rounded p-2 pointer-events-none z-10 shadow-lg">
+                                                <strong>Maker</strong> = limit order (lower fee). <strong>Taker</strong> = market order (higher fee). Fees are charged on the full position value.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => handleInputChange('includeFees', (!inputs.includeFees).toString())}
+                                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${inputs.includeFees ? 'bg-emerald-500' : 'bg-[#3A3A3A]'
+                                            }`}
+                                        role="switch"
+                                        aria-checked={inputs.includeFees}
+                                        aria-label="Include Fees"
+                                    >
+                                        <span
+                                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${inputs.includeFees ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                                                }`}
+                                        />
+                                    </button>
+                                </div>
+
+                                {/* Fee controls — only visible when includeFees is ON */}
+                                {inputs.includeFees && (
+                                    <>
+                                        {/* Exchange Preset Dropdown */}
+                                        <div>
+                                            <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Exchange</label>
+                                            <select
+                                                className="w-full bg-[#1A1A1A] border border-[#3A3A3A] rounded-md py-2 px-3 text-white text-sm focus:outline-none focus:border-emerald-500 cursor-pointer"
+                                                value={inputs.exchange}
+                                                onChange={(e) => {
+                                                    const name = e.target.value;
+                                                    handleInputChange('exchange', name);
+                                                    const preset = getPreset(name);
+                                                    if (preset) {
+                                                        handleInputChange('makerFeePercent', feeToPercent(preset.makerFee));
+                                                        handleInputChange('takerFeePercent', feeToPercent(preset.takerFee));
+                                                    }
+                                                }}
+                                            >
+                                                {EXCHANGE_PRESETS.map((p) => (
+                                                    <option key={p.name} value={p.name}>{p.name}</option>
+                                                ))}
+                                                <option value="Custom">Custom</option>
+                                            </select>
+                                        </div>
+
+                                        {/* Entry/Exit Order Type Toggles */}
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                                <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Entry Order</label>
+                                                <div className="flex rounded-md overflow-hidden border border-[#3A3A3A]">
+                                                    <button
+                                                        onClick={() => handleInputChange('entryOrderType', 'maker')}
+                                                        className={`flex-1 py-1.5 text-xs font-medium transition-colors ${inputs.entryOrderType === 'maker'
+                                                            ? 'bg-emerald-500/15 text-emerald-400 border-r border-emerald-500/30'
+                                                            : 'bg-[#1A1A1A] text-gray-500 border-r border-[#3A3A3A] hover:text-gray-300'
+                                                            }`}
+                                                    >Maker</button>
+                                                    <button
+                                                        onClick={() => handleInputChange('entryOrderType', 'taker')}
+                                                        className={`flex-1 py-1.5 text-xs font-medium transition-colors ${inputs.entryOrderType === 'taker'
+                                                            ? 'bg-amber-500/15 text-amber-400'
+                                                            : 'bg-[#1A1A1A] text-gray-500 hover:text-gray-300'
+                                                            }`}
+                                                    >Taker</button>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Exit Order</label>
+                                                <div className="flex rounded-md overflow-hidden border border-[#3A3A3A]">
+                                                    <button
+                                                        onClick={() => handleInputChange('exitOrderType', 'maker')}
+                                                        className={`flex-1 py-1.5 text-xs font-medium transition-colors ${inputs.exitOrderType === 'maker'
+                                                            ? 'bg-emerald-500/15 text-emerald-400 border-r border-emerald-500/30'
+                                                            : 'bg-[#1A1A1A] text-gray-500 border-r border-[#3A3A3A] hover:text-gray-300'
+                                                            }`}
+                                                    >Maker</button>
+                                                    <button
+                                                        onClick={() => handleInputChange('exitOrderType', 'taker')}
+                                                        className={`flex-1 py-1.5 text-xs font-medium transition-colors ${inputs.exitOrderType === 'taker'
+                                                            ? 'bg-amber-500/15 text-amber-400'
+                                                            : 'bg-[#1A1A1A] text-gray-500 hover:text-gray-300'
+                                                            }`}
+                                                    >Taker</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Maker/Taker Fee Inputs */}
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                                <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Maker Fee %</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="number"
+                                                        step="0.001"
+                                                        className={`w-full bg-[#1A1A1A] border border-[#3A3A3A] rounded-md py-1.5 px-3 pr-6 text-white text-sm focus:outline-none focus:border-emerald-500 ${inputs.exchange !== 'Custom' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                                        value={inputs.makerFeePercent}
+                                                        onChange={(e) => handleInputChange('makerFeePercent', e.target.value)}
+                                                        readOnly={inputs.exchange !== 'Custom'}
+                                                    />
+                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Taker Fee %</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="number"
+                                                        step="0.001"
+                                                        className={`w-full bg-[#1A1A1A] border border-[#3A3A3A] rounded-md py-1.5 px-3 pr-6 text-white text-sm focus:outline-none focus:border-emerald-500 ${inputs.exchange !== 'Custom' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                                        value={inputs.takerFeePercent}
+                                                        onChange={(e) => handleInputChange('takerFeePercent', e.target.value)}
+                                                        readOnly={inputs.exchange !== 'Custom'}
+                                                    />
+                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+
                         {/* Lot Size Input (Futures Only) */}
                         {inputs.assetClass === 'futures' && (
                             <div>
@@ -1255,20 +1472,66 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                             </span>
                         </div>
 
+                        {/* Fee Breakdown (Crypto & Futures) */}
+                        {outputs.isComplete && outputs.totalFee > 0 && (
+                            <>
+                                <div className="flex justify-between items-center px-3 md:px-4 py-1.5 border-b border-[#2A2A2A] bg-[#0D0D0D]">
+                                    <span className="text-[10px] md:text-xs text-gray-500">Entry Fee ({inputs.entryOrderType})</span>
+                                    <span className="font-mono text-xs md:text-sm text-gray-400">
+                                        {formatCurrency(outputs.entryFee)}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center px-3 md:px-4 py-1.5 border-b border-[#2A2A2A] bg-[#0D0D0D]">
+                                    <span className="text-[10px] md:text-xs text-gray-500">Exit Fee ({inputs.exitOrderType})</span>
+                                    <span className="font-mono text-xs md:text-sm text-gray-400">
+                                        {formatCurrency(outputs.exitFee)}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center px-3 md:px-4 py-2 border-b border-[#2A2A2A]">
+                                    <span className="text-xs md:text-sm text-amber-400 font-medium">Total Round-trip Fee</span>
+                                    <span className="font-mono text-sm md:text-base font-semibold text-amber-400">
+                                        {formatCurrency(outputs.totalFee)}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
+                                    <span className="text-xs md:text-sm text-red-400 font-medium">Real Risk (incl. fees)</span>
+                                    <span className="font-mono text-sm md:text-base font-semibold text-red-400">
+                                        {formatCurrency(outputs.realRisk)}
+                                    </span>
+                                </div>
+                                {outputs.breakEvenPrice > 0 && (
+                                    <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
+                                        <span className="text-xs md:text-sm text-gray-400">Break-even Price</span>
+                                        <span className="font-mono text-sm md:text-base font-semibold text-blue-400">
+                                            {formatCurrency(outputs.breakEvenPrice)}
+                                        </span>
+                                    </div>
+                                )}
+                            </>
+                        )}
+
                         {/* Potential Profit */}
                         <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
-                            <span className="text-xs md:text-sm text-gray-400">Potential Profit</span>
-                            <span className={`font-mono text-sm md:text-base font-semibold ${outputs.potentialProfit > 0 ? 'text-emerald-500' : 'text-gray-600'
+                            <span className="text-xs md:text-sm text-gray-400">
+                                {outputs.totalFee > 0 ? 'Adjusted Profit' : 'Potential Profit'}
+                            </span>
+                            <span className={`font-mono text-sm md:text-base font-semibold ${outputs.adjustedProfit > 0 ? 'text-emerald-500' : outputs.adjustedProfit < 0 ? 'text-red-500' : 'text-gray-600'
                                 }`}>
-                                {outputs.potentialProfit > 0 ? formatCurrency(outputs.potentialProfit) : '—'}
+                                {outputs.potentialProfit !== 0 || outputs.adjustedProfit !== 0
+                                    ? formatCurrency(outputs.totalFee > 0 ? outputs.adjustedProfit : outputs.potentialProfit)
+                                    : '—'}
                             </span>
                         </div>
 
                         {/* Risk:Reward Ratio */}
                         <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3">
-                            <span className="text-xs md:text-sm text-gray-400">Risk:Reward Ratio</span>
-                            <span className={`font-mono text-sm md:text-base font-semibold ${outputs.rrr >= 1 ? 'text-emerald-500' : 'text-gray-500'}`}>
-                                {outputs.rrr > 0 ? `1:${formatNumber(outputs.rrr, 1)}` : '—'}
+                            <span className="text-xs md:text-sm text-gray-400">
+                                {outputs.totalFee > 0 ? 'Adjusted R:R' : 'Risk:Reward Ratio'}
+                            </span>
+                            <span className={`font-mono text-sm md:text-base font-semibold ${(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr) >= 1 ? 'text-emerald-500' : 'text-gray-500'}`}>
+                                {(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr) > 0
+                                    ? `1:${formatNumber(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr, 1)}`
+                                    : '—'}
                             </span>
                         </div>
 
