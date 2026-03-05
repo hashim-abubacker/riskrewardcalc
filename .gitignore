@@ -41,7 +41,25 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/src/generated/prisma
-
 # Artifacts and local AI files
 .gemini/
+
+# Design mockup / Stitch files
+Stitch files/
+
+# Local lint debug logs
+lint.txt
+lint-utf8.txt
+
+# Runtime user uploads (serve from CDN/server storage, not git)
+/public/uploads/
+
+# Default Next.js/Vercel boilerplate assets (unused)
+/public/next.svg
+/public/vercel.svg
+/public/file.svg
+/public/window.svg
+/public/globe.svg
+
+# Debug API routes (never commit these)
+/src/app/api/debug-*/
