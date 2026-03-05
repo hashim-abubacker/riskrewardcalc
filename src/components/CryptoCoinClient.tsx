@@ -57,7 +57,7 @@ export function CryptoCoinClient({ coinData }: CryptoCoinClientProps) {
                 <p className="text-gray-400 text-sm leading-relaxed">
                     {coinData.name} ({coinData.symbol}) is {coinData.description}.
                     Use our free position size calculator to determine how much {coinData.symbol} to buy based on your risk percentage.
-                    Simply enter your account balance, the percentage you're willing to risk, and your entry and stop-loss prices to get your optimal position size.
+                    Simply enter your account balance, the percentage you&apos;re willing to risk, and your entry and stop-loss prices to get your optimal position size.
                 </p>
             </div>
 

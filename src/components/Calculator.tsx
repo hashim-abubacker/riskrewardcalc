@@ -1,9 +1,17 @@
 'use client';
 
+import { Card } from '@/components/ui/Card';
+import { GlassPanel } from '@/components/ui/GlassPanel';
+import { Input } from '@/components/ui/Input';
+import { MarketPlate } from '@/components/ui/MarketPlate';
+import { Slider } from '@/components/ui/Slider';
+import { Button } from '@/components/ui/Button';
+import { ShareCard } from '@/components/ShareCard';
+import html2canvas from 'html2canvas';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber, getCurrencySymbol, SupportedLocale } from '@/lib/formatters';
 import { trackAssetClassSwitch, trackRiskModeToggle, trackFormReset, trackResetUndo, trackCalculation } from '@/lib/analytics';
-import { FOREX_PAIRS, ForexPair, calculatePipValue } from '@/lib/forexPairs';
+import { FOREX_PAIRS, calculatePipValue } from '@/lib/forexPairs';
 import { calculateIndiaCharges, getIndiaLeverage, calculateMaxMarginQty, IndiaCharges, IndiaTradeMode } from '@/lib/indiaCharges';
 import { EXCHANGE_PRESETS, DEFAULT_EXCHANGE, getPreset, feeToPercent, percentToFee, OrderType } from '@/lib/exchangePresets';
 
@@ -148,7 +156,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
     // Update entry price when defaultEntryPrice changes (from live price)
     useEffect(() => {
         if (defaultEntryPrice) {
-            setInputs(prev => ({ ...prev, entryPrice: defaultEntryPrice }));
+            setTimeout(() => setInputs(prev => ({ ...prev, entryPrice: defaultEntryPrice })), 0);
         }
     }, [defaultEntryPrice, forceUpdateId]);
 
@@ -194,10 +202,14 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
     const [toastExiting, setToastExiting] = useState(false);
     const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Share functionality
+    const shareCardRef = useRef<HTMLDivElement>(null);
+    const [isSharing, setIsSharing] = useState(false);
+
     useEffect(() => {
         const savedBalance = localStorage.getItem(STORAGE_KEY);
         if (savedBalance) {
-            setInputs(prev => ({ ...prev, balance: savedBalance }));
+            setTimeout(() => setInputs(prev => ({ ...prev, balance: savedBalance })), 0);
         }
     }, []);
 
@@ -212,11 +224,11 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
         if (inputs.riskMode === 'percent') {
             const percent = parseFloat(inputs.riskPercent) || 0;
             const fiatValue = (balance * percent) / 100;
-            setInputs(prev => ({ ...prev, riskFiat: fiatValue.toFixed(2) }));
+            setTimeout(() => setInputs(prev => ({ ...prev, riskFiat: fiatValue.toFixed(2) })), 0);
         } else {
             const fiat = parseFloat(inputs.riskFiat) || 0;
             const percentValue = balance > 0 ? (fiat / balance) * 100 : 0;
-            setInputs(prev => ({ ...prev, riskPercent: percentValue.toFixed(2) }));
+            setTimeout(() => setInputs(prev => ({ ...prev, riskPercent: percentValue.toFixed(2) })), 0);
         }
     }, [inputs.balance, inputs.riskMode, inputs.riskPercent, inputs.riskFiat]);
 
@@ -464,7 +476,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
         }
 
         // Calculate Staged Exits (Multiple Targets)
-        let stagedExits: StagedExitResult[] = [];
+        const stagedExits: StagedExitResult[] = [];
         let totalStagedProfit = 0;
 
         if (inputs.useMultipleTargets && positionSizeUnits > 0 && entry > 0 && riskAmount > 0 && direction) {
@@ -538,7 +550,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
     }, [inputs, touched]);
 
     useEffect(() => {
-        calculate();
+        setTimeout(() => calculate(), 0);
     }, [calculate]);
 
     // Track successful calculations (debounced to avoid spam)
@@ -559,6 +571,32 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
             calculationTrackedRef.current = false;
         }
     }, [outputs.isComplete, outputs.tradeDirection, inputs.assetClass, inputs.leverage, inputs.targetPrice]);
+
+    const handleShareImage = async () => {
+        if (!shareCardRef.current || isSharing) return;
+
+        setIsSharing(true);
+        try {
+            const canvas = await html2canvas(shareCardRef.current, {
+                scale: 2, // High resolution (2160x2160)
+                backgroundColor: '#050607',
+                logging: false,
+                useCORS: true
+            });
+
+            const imageURL = canvas.toDataURL('image/png', 0.95);
+            const link = document.createElement('a');
+            link.href = imageURL;
+            const instrumentName = inputs.assetClass === 'forex' ? inputs.forexPair : inputs.assetClass;
+            link.download = `trade-setup-${outputs.tradeDirection || 'INFO'}-${instrumentName}-${Date.now()}.png`;
+            link.click();
+        } catch (error) {
+            console.error('Failed to generate image', error);
+            alert('Failed to generate sharing image. Please try again.');
+        } finally {
+            setIsSharing(false);
+        }
+    };
 
     const handleInputChange = (field: keyof CalculatorInputs, value: string) => {
         // Handle boolean fields
@@ -667,11 +705,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
     // Get currency symbol for input fields
     const currencySymbol = getCurrencySymbol(locale);
 
-    // Helper to get input error class
-    const getInputClass = (field: keyof FieldErrors, baseClass: string): string => {
-        const hasError = outputs.fieldErrors[field];
-        return `${baseClass} ${hasError ? 'border-red-500 focus:border-red-500' : 'border-[#3A3A3A] focus:border-emerald-500'}`;
-    };
+
 
     // Helper to render field error
     const renderFieldError = (field: keyof FieldErrors) => {
@@ -688,22 +722,24 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
     };
 
     return (
-        <div className="max-w-[1000px] mx-auto px-3 py-3 md:py-4">
-            {/* Title - Compact on smaller screens */}
-            <div className="text-center mb-4 md:mb-6">
-                <h1 className="text-xl md:text-2xl font-bold text-white mb-1">
-                    Smart Position Size & Risk Calculator
+        <div className="max-w-[1060px] mx-auto px-4 py-4 md:py-8">
+            {/* Title */}
+            <div className="text-center mb-6 md:mb-10">
+                <h1 className="text-2xl md:text-4xl font-bold text-white mb-2 tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                    Smart Position Size &amp; Risk Calculator
                 </h1>
-                <p className="text-xs md:text-sm text-gray-400">
-                    Calculate your position size based on wallet risk
+                <p className="text-xs md:text-sm tracking-wide" style={{ color: '#6b7280', fontFamily: "'Space Grotesk', sans-serif" }}>
+                    Professional grade trade orchestration
                 </p>
             </div>
 
-            {/* Asset Class Selector */}
-            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg p-1.5 mb-4 flex gap-1">
+            {/* Asset Class Selector — market-plate skeuomorphic */}
+            <div className="w-full max-w-2xl mx-auto mb-8 grid grid-cols-4 gap-2 p-2 rounded-xl" style={{ background: '#050607', boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.5)' }}>
                 {(['forex', 'stocks', 'crypto', 'futures'] as AssetClass[]).map((ac) => (
-                    <button
+                    <MarketPlate
                         key={ac}
+                        active={inputs.assetClass === ac}
+                        label={ac.charAt(0).toUpperCase() + ac.slice(1)}
                         onClick={() => {
                             if (inputs.assetClass !== ac) {
                                 trackAssetClassSwitch(inputs.assetClass, ac);
@@ -715,13 +751,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                 handleInputChange('leverage', '10');
                             }
                         }}
-                        className={`flex-1 py-1.5 rounded text-xs md:text-sm font-medium transition-colors ${inputs.assetClass === ac
-                            ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
-                            : 'text-gray-400 hover:text-gray-300 hover:bg-[#2A2A2A]'
-                            }`}
-                    >
-                        {ac.charAt(0).toUpperCase() + ac.slice(1)}
-                    </button>
+                    />
                 ))}
             </div>
 
@@ -734,23 +764,18 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                     <div className="flex gap-2">
                         <button
                             onClick={() => handleInputChange('stockMarket', 'global')}
-                            className={`flex-1 py-2 px-3 rounded-md text-xs md:text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${inputs.stockMarket === 'global'
-                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
-                                : 'bg-[#0D0D0D] text-gray-400 border border-[#3A3A3A] hover:border-gray-500'
-                                }`}
+                            className={`market-plate flex-1 py-3 px-3 rounded-lg text-xs md:text-[13px] font-bold tracking-wide flex items-center justify-center gap-2 ${inputs.stockMarket === 'global' ? 'active' : ''}`}
                         >
-                            <span>🌍</span>
-                            <span>Global</span>
+                            <span className={`text-[14px] transition-all ${inputs.stockMarket === 'global' ? '' : 'opacity-50 grayscale'}`}>🌍</span>
+                            <span style={{ color: inputs.stockMarket === 'global' ? '#00FF9D' : '#4b5563' }}>Global</span>
                         </button>
                         <button
                             onClick={() => handleInputChange('stockMarket', 'india')}
-                            className={`flex-1 py-2 px-3 rounded-md text-xs md:text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${inputs.stockMarket === 'india'
-                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
-                                : 'bg-[#0D0D0D] text-gray-400 border border-[#3A3A3A] hover:border-gray-500'
-                                }`}
+                            className={`market-plate flex-1 py-3 px-3 rounded-lg text-xs md:text-[13px] font-bold tracking-wide flex items-center justify-center gap-2 ${inputs.stockMarket === 'india' ? 'active' : ''}`}
                         >
-                            <span>🇮🇳</span>
-                            <span>India (NSE)</span>
+                            <span className={`text-[14px] transition-all flex items-center gap-1 ${inputs.stockMarket === 'india' ? 'text-[#00FF9D]' : 'text-[#4b5563]'}`}>
+                                <span className={inputs.stockMarket === 'india' ? '' : 'opacity-50 grayscale'}>🇮🇳</span> India (NSE)
+                            </span>
                         </button>
                     </div>
                     {inputs.stockMarket === 'india' && (
@@ -770,930 +795,922 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                     <div className="flex gap-2">
                         <button
                             onClick={() => handleInputChange('indiaTradeMode', 'intraday')}
-                            className={`flex-1 py-2.5 px-3 rounded-md text-xs md:text-sm font-medium transition-colors ${inputs.indiaTradeMode === 'intraday'
-                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
-                                : 'bg-[#0D0D0D] text-gray-400 border border-[#3A3A3A] hover:border-gray-500'
-                                }`}
+                            className={`market-plate flex-1 py-3.5 px-3 rounded-lg flex flex-col items-center justify-center gap-1 ${inputs.indiaTradeMode === 'intraday' ? 'active' : ''}`}
                         >
-                            <div className="flex items-center justify-center gap-1.5 mb-0.5">
-                                <span>⚡</span>
+                            <div className={`flex items-center gap-1.5 text-xs md:text-[13px] font-bold tracking-wide ${inputs.indiaTradeMode === 'intraday' ? 'text-[#00FF9D]' : 'text-[#4b5563]'}`}>
+                                <span className={inputs.indiaTradeMode === 'intraday' ? '' : 'opacity-50 grayscale'}>⚡</span>
                                 <span>Intraday (MIS)</span>
                             </div>
-                            <div className="text-[10px] text-gray-500">5x Leverage</div>
+                            <div className="text-[10px]" style={{ color: inputs.indiaTradeMode === 'intraday' ? 'rgba(0,255,157,0.5)' : '#4b5563' }}>5x Leverage</div>
                         </button>
                         <button
                             onClick={() => handleInputChange('indiaTradeMode', 'delivery')}
-                            className={`flex-1 py-2.5 px-3 rounded-md text-xs md:text-sm font-medium transition-colors ${inputs.indiaTradeMode === 'delivery'
-                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/50'
-                                : 'bg-[#0D0D0D] text-gray-400 border border-[#3A3A3A] hover:border-gray-500'
-                                }`}
+                            className={`market-plate flex-1 py-3.5 px-3 rounded-lg flex flex-col items-center justify-center gap-1 ${inputs.indiaTradeMode === 'delivery' ? 'active' : ''}`}
                         >
-                            <div className="flex items-center justify-center gap-1.5 mb-0.5">
-                                <span>📦</span>
-                                <span>Delivery (CNC)</span>
+                            <div className={`flex items-center gap-1.5 text-xs md:text-[13px] font-bold tracking-wide ${inputs.indiaTradeMode === 'delivery' ? 'text-orange-300' : 'text-[#4b5563]'}`}>
+                                <span className={inputs.indiaTradeMode === 'delivery' ? '' : 'opacity-50 grayscale'}>📦</span>
+                                <span style={{ color: inputs.indiaTradeMode === 'delivery' ? '#00FF9D' : '#4b5563' }}>Delivery (CNC)</span>
                             </div>
-                            <div className="text-[10px] text-gray-500">No Leverage</div>
+                            <div className="text-[10px]" style={{ color: inputs.indiaTradeMode === 'delivery' ? 'rgba(0,255,157,0.5)' : '#4b5563' }}>No Leverage</div>
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* Two Column Layout - Fluid Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+            {/* Two Column Layout */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 items-stretch">
 
-                {/* LEFT: Trade Setup Card (Inputs) - Second on mobile, First on desktop */}
-                <div className="order-2 md:order-1 bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg md:rounded-xl overflow-hidden">
-                    {/* Card Header */}
-                    <div className="px-3 md:px-4 py-2 md:py-3 border-b border-[#2A2A2A] text-sm md:text-base font-semibold text-white">
-                        Trade Setup
-                    </div>
+                {/* LEFT: Trade Setup Card — obsidian chassis */}
+                <Card withScrews={true} className="order-2 md:order-1 p-1 rounded-[1.5rem]">
+                    <div className="rounded-[1.3rem] h-full border border-white/5 shadow-2xl relative overflow-hidden" style={{ background: '#121417' }}>
 
-                    {/* Card Body */}
-                    <div className="p-3 md:p-4 space-y-3">
-                        {/* Account Balance */}
-                        <div>
-                            <label className="block text-xs md:text-sm text-gray-400 mb-1">
-                                Account Balance
-                                <span className="text-red-400 ml-0.5">*</span>
-                            </label>
-                            <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
-                                <input
+                        {/* Card Header */}
+                        <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+                            <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white opacity-50">Setup Modules</h2>
+                            <span className="text-[10px] font-mono opacity-60" style={{ color: '#00FF9D' }}>SYSTEM READY</span>
+                        </div>
+
+                        {/* Card Body */}
+                        <div className="p-5 space-y-5">
+
+                            {/* Account Balance */}
+                            <div>
+                                <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>
+                                    Account Balance ({currencySymbol})
+                                </label>
+                                <Input
                                     type="number"
-                                    className={getInputClass('balance', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
+                                    className="text-right text-lg"
                                     placeholder="25,000"
                                     value={inputs.balance}
                                     onChange={(e) => handleInputChange('balance', e.target.value)}
                                     onBlur={() => handleBlur('balance')}
                                     tabIndex={1}
+                                    prefixNode={<span className="font-mono text-lg" style={{ color: 'rgba(0,255,157,0.25)' }}>{currencySymbol}</span>}
+                                    hasError={!!outputs.fieldErrors.balance}
                                 />
+                                {renderFieldError('balance')}
                             </div>
-                            {renderFieldError('balance')}
-                        </div>
 
-                        {/* Risk Mode Toggle */}
-                        <div>
-                            <div className="flex items-center justify-between mb-1">
-                                <label className="text-xs md:text-sm text-gray-400">
-                                    Risk Mode
-                                    <span className="text-red-400 ml-0.5">*</span>
-                                </label>
-                                <div
-                                    className="flex items-center gap-1.5 cursor-pointer"
-                                    onClick={toggleRiskMode}
-                                    role="button"
-                                    tabIndex={2}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleRiskMode(); }}
-                                    aria-label={`Switch to ${inputs.riskMode === 'percent' ? 'dollar amount' : 'percentage'} mode`}
-                                >
-                                    <span className={`text-xs ${inputs.riskMode === 'fiat' ? 'text-emerald-400' : 'text-gray-500'}`}>{currencySymbol}</span>
-                                    <div className={`relative w-10 md:w-12 h-5 md:h-6 rounded-full transition-colors ${inputs.riskMode === 'percent' ? 'bg-emerald-500' : 'bg-[#3A3A3A]'}`}>
-                                        <div className={`absolute top-0.5 md:top-1 w-4 h-4 bg-white rounded-full transition-transform flex items-center justify-center text-[8px] md:text-[10px] font-bold text-gray-900 ${inputs.riskMode === 'percent' ? 'left-5 md:left-6' : 'left-0.5 md:left-1'}`}>
-                                            {inputs.riskMode === 'percent' ? '%' : currencySymbol}
+                            {/* ── Row: Risk Mode (40%) + Entry Price (60%) ── */}
+                            <div className="flex gap-3">
+                                {/* Risk Mode — 40% */}
+                                <div style={{ flex: '0 0 40%' }}>
+                                    <div className="flex items-center justify-between mb-1.5 px-1 h-[26px]">
+                                        <label className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: '#6b7280' }}>Risk</label>
+                                        <div className="flex gap-1 p-0.5 rounded border border-white/5" style={{ background: 'rgba(0,0,0,0.4)' }}>
+                                            <button
+                                                onClick={() => inputs.riskMode !== 'fiat' && toggleRiskMode()}
+                                                className="px-1.5 py-0.5 text-[9px] rounded transition-colors"
+                                                style={inputs.riskMode === 'fiat' ? { background: '#00FF9D', color: '#000', fontWeight: 700 } : { background: 'rgba(255,255,255,0.05)', color: '#9ca3af' }}
+                                            >{currencySymbol}</button>
+                                            <button
+                                                onClick={() => inputs.riskMode !== 'percent' && toggleRiskMode()}
+                                                className="px-1.5 py-0.5 text-[9px] rounded transition-colors"
+                                                style={inputs.riskMode === 'percent' ? { background: '#00FF9D', color: '#000', fontWeight: 700 } : { background: 'rgba(255,255,255,0.05)', color: '#9ca3af' }}
+                                            >%</button>
                                         </div>
                                     </div>
-                                    <span className={`text-xs ${inputs.riskMode === 'percent' ? 'text-emerald-400' : 'text-gray-500'}`}>%</span>
+                                    <Input
+                                        type="number"
+                                        className="text-left"
+                                        placeholder={inputs.riskMode === 'percent' ? '1' : '100'}
+                                        value={inputs.riskMode === 'percent' ? inputs.riskPercent : inputs.riskFiat}
+                                        onChange={(e) => handleInputChange(
+                                            inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat',
+                                            e.target.value
+                                        )}
+                                        onBlur={() => handleBlur(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat')}
+                                        tabIndex={2}
+                                        suffixNode={<span className="font-mono text-base" style={{ color: 'rgba(0,255,157,0.25)' }}>{inputs.riskMode === 'percent' ? '%' : currencySymbol}</span>}
+                                        hasError={!!outputs.fieldErrors[inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat']}
+                                    />
+                                    {renderFieldError(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat')}
+                                </div>
+
+                                {/* Entry Price — 60% */}
+                                <div style={{ flex: '1 1 0%' }}>
+                                    <div className="flex items-center mb-1.5 px-1 h-[26px]">
+                                        <label className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: '#6b7280' }}>
+                                            Entry Price
+                                            {outputs.tradeDirection && (
+                                                <span className="ml-1.5 text-[10px]" style={{ color: outputs.tradeDirection === 'LONG' ? '#00FF9D' : '#ef4444' }}>
+                                                    ({outputs.tradeDirection})
+                                                </span>
+                                            )}
+                                        </label>
+                                    </div>
+                                    <Input
+                                        type="number"
+                                        className="text-right"
+                                        placeholder="45,000"
+                                        value={inputs.entryPrice}
+                                        onChange={(e) => handleInputChange('entryPrice', e.target.value)}
+                                        onBlur={() => handleBlur('entryPrice')}
+                                        tabIndex={4}
+                                        prefixNode={<span className="font-mono text-base" style={{ color: 'rgba(0,255,157,0.25)' }}>{currencySymbol}</span>}
+                                        hasError={!!outputs.fieldErrors.entryPrice}
+                                    />
+                                    {renderFieldError('entryPrice')}
                                 </div>
                             </div>
-                            <input
-                                type="number"
-                                className={getInputClass(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 text-white text-sm focus:outline-none')}
-                                placeholder={inputs.riskMode === 'percent' ? '1' : '100'}
-                                value={inputs.riskMode === 'percent' ? inputs.riskPercent : inputs.riskFiat}
-                                onChange={(e) => handleInputChange(
-                                    inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat',
-                                    e.target.value
-                                )}
-                                onBlur={() => handleBlur(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat')}
-                                tabIndex={3}
-                            />
-                            {renderFieldError(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat')}
-                            {/* Max Risk Amount Display for Indian Stocks */}
-                            {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && inputs.balance && parseFloat(inputs.riskPercent) > 0 && (
-                                <div className="mt-1.5 text-[10px] md:text-xs text-emerald-400/80">
-                                    💰 Your {inputs.riskPercent}% = {formatCurrency(parseFloat(inputs.balance) * parseFloat(inputs.riskPercent) / 100)} max risk
-                                </div>
-                            )}
-                        </div>
 
-                        {/* Entry Price */}
-                        <div>
-                            <label className="block text-xs md:text-sm text-gray-400 mb-1">
-                                Entry Price
-                                <span className="text-red-400 ml-0.5">*</span>
-                                {outputs.tradeDirection && (
-                                    <span className={`ml-1.5 text-xs ${outputs.tradeDirection === 'LONG' ? 'text-emerald-500' : 'text-red-500'}`}>
-                                        ({outputs.tradeDirection})
-                                    </span>
-                                )}
-                            </label>
-                            <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
-                                <input
-                                    type="number"
-                                    className={getInputClass('entryPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
-                                    placeholder="45,000"
-                                    value={inputs.entryPrice}
-                                    onChange={(e) => handleInputChange('entryPrice', e.target.value)}
-                                    onBlur={() => handleBlur('entryPrice')}
-                                    tabIndex={4}
-                                />
-                            </div>
-                            {renderFieldError('entryPrice')}
-                        </div>
-
-                        {/* Stop Loss Input (Price or Pips) */}
-                        <div>
-                            <div className="flex items-center justify-between mb-1">
-                                <label className="text-xs md:text-sm text-gray-400">
-                                    Stop Loss
-                                    <span className="text-red-400 ml-0.5">*</span>
-                                </label>
-
-                                {/* Stop Loss Mode Toggle (Forex Only) */}
-                                {inputs.assetClass === 'forex' && (
-                                    <div
-                                        className="flex items-center gap-1.5 cursor-pointer"
-                                        onClick={() => {
-                                            const newMode = inputs.stopLossMode === 'price' ? 'pips' : 'price';
-                                            handleInputChange('stopLossMode', newMode);
-                                            // Clear the other field to avoid confusion
-                                            if (newMode === 'pips') handleInputChange('stopLossPrice', '');
-                                            else handleInputChange('stopLossPips', '');
-                                        }}
-                                        role="button"
-                                        tabIndex={inputs.assetClass === 'forex' ? 5 : -1}
-                                    >
-                                        <span className={`text-xs ${inputs.stopLossMode === 'price' ? 'text-emerald-400' : 'text-gray-500'}`}>Price</span>
-                                        <div className={`relative w-10 md:w-12 h-5 md:h-6 rounded-full transition-colors ${inputs.stopLossMode === 'pips' ? 'bg-emerald-500' : 'bg-[#3A3A3A]'}`}>
-                                            <div className={`absolute top-0.5 md:top-1 w-4 h-4 bg-white rounded-full transition-transform flex items-center justify-center text-[8px] md:text-[10px] font-bold text-gray-900 ${inputs.stopLossMode === 'pips' ? 'left-5 md:left-6' : 'left-0.5 md:left-1'}`}>
-                                                {inputs.stopLossMode === 'pips' ? 'P' : '$'}
+                            {/* ── Row: Stop Loss (50%) + Target Price (50%) ── */}
+                            <div className="flex gap-3">
+                                {/* Stop Loss — 50% */}
+                                <div className="flex-1">
+                                    <div className="flex items-center justify-between mb-1.5 px-1 h-[26px]">
+                                        <label className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: '#ef4444', opacity: 0.8 }}>Stop Loss</label>
+                                        {inputs.assetClass === 'forex' && (
+                                            <div
+                                                className="flex items-center gap-1 cursor-pointer"
+                                                onClick={() => {
+                                                    const newMode = inputs.stopLossMode === 'price' ? 'pips' : 'price';
+                                                    handleInputChange('stopLossMode', newMode);
+                                                    if (newMode === 'pips') handleInputChange('stopLossPrice', '');
+                                                    else handleInputChange('stopLossPips', '');
+                                                }}
+                                                role="button"
+                                            >
+                                                <span className="text-[9px]" style={{ color: inputs.stopLossMode === 'price' ? '#00FF9D' : '#6b7280' }}>Price</span>
+                                                <div className="relative w-8 h-4 rounded-full transition-colors" style={{ background: inputs.stopLossMode === 'pips' ? '#00FF9D' : '#3A3A3A' }}>
+                                                    <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${inputs.stopLossMode === 'pips' ? 'left-4' : 'left-0.5'}`} />
+                                                </div>
+                                                <span className="text-[9px]" style={{ color: inputs.stopLossMode === 'pips' ? '#00FF9D' : '#6b7280' }}>Pips</span>
                                             </div>
-                                        </div>
-                                        <span className={`text-xs ${inputs.stopLossMode === 'pips' ? 'text-emerald-400' : 'text-gray-500'}`}>Pips</span>
+                                        )}
                                     </div>
-                                )}
-                            </div>
-
-                            <div className="relative">
-                                {inputs.stopLossMode === 'price' ? (
-                                    <>
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
-                                        <input
+                                    {inputs.stopLossMode === 'price' ? (
+                                        <Input
                                             type="number"
-                                            className={getInputClass('stopLossPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none')}
+                                            className="text-right"
                                             placeholder="43,500"
                                             value={inputs.stopLossPrice}
                                             onChange={(e) => handleInputChange('stopLossPrice', e.target.value)}
                                             onBlur={() => handleBlur('stopLossPrice')}
                                             tabIndex={5}
+                                            containerClassName="border-red-500/10 shadow-[inset_0_0_15px_rgba(239,68,68,0.04)]"
+                                            hasError={!!outputs.fieldErrors.stopLossPrice}
                                         />
-                                    </>
-                                ) : (
-                                    <input
-                                        type="number"
-                                        className={getInputClass('stopLossPrice', 'w-full bg-[#0D0D0D] border rounded-md md:rounded-lg py-2 md:py-2.5 px-3 text-white text-sm focus:outline-none')}
-                                        placeholder="50"
-                                        value={inputs.stopLossPips}
-                                        onChange={(e) => handleInputChange('stopLossPips', e.target.value)}
-                                        onBlur={() => handleBlur('stopLossPrice')} // Reuse stopLossPrice validation key for simplicity
-                                        tabIndex={5}
-                                    />
-                                )}
-                            </div>
-                            {renderFieldError('stopLossPrice')}
-                        </div>
-
-                        {/* Target Price */}
-                        <div>
-                            <div className="flex items-center justify-between mb-1">
-                                <label className="text-xs md:text-sm text-gray-400">
-                                    Target Price <span className="text-gray-600">(Optional)</span>
-                                </label>
-                                {/* Multiple Targets Toggle */}
-                                <div
-                                    className="flex items-center gap-1.5 cursor-pointer"
-                                    onClick={() => handleInputChange('useMultipleTargets', (!inputs.useMultipleTargets).toString())}
-                                    role="button"
-                                    tabIndex={0}
-                                >
-                                    <span className={`text-[10px] ${inputs.useMultipleTargets ? 'text-emerald-400' : 'text-gray-500'}`}>
-                                        Multi-Target
-                                    </span>
-                                    <div className={`relative w-8 h-4 rounded-full transition-colors ${inputs.useMultipleTargets ? 'bg-emerald-500' : 'bg-[#3A3A3A]'}`}>
-                                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${inputs.useMultipleTargets ? 'left-4' : 'left-0.5'}`} />
-                                    </div>
+                                    ) : (
+                                        <Input
+                                            type="number"
+                                            className="text-right"
+                                            placeholder="50 pips"
+                                            value={inputs.stopLossPips}
+                                            onChange={(e) => handleInputChange('stopLossPips', e.target.value)}
+                                            onBlur={() => handleBlur('stopLossPips')}
+                                            tabIndex={5}
+                                            containerClassName="border-red-500/10 shadow-[inset_0_0_15px_rgba(239,68,68,0.04)]"
+                                        />
+                                    )}
+                                    {renderFieldError('stopLossPrice')}
                                 </div>
-                            </div>
 
-                            {!inputs.useMultipleTargets ? (
-                                /* Single Target Mode */
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currencySymbol}</span>
-                                    <input
-                                        type="number"
-                                        className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
-                                        placeholder="50,000"
-                                        value={inputs.targetPrice}
-                                        onChange={(e) => handleInputChange('targetPrice', e.target.value)}
-                                        tabIndex={6}
-                                    />
-                                </div>
-                            ) : (
-                                /* Multiple Targets Mode */
-                                <div className="space-y-2">
-                                    {/* T1 */}
-                                    <div className="flex gap-2">
-                                        <div className="flex-1 relative">
-                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-emerald-400 text-[10px] font-semibold">T1</span>
-                                            <input
-                                                type="number"
-                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
-                                                placeholder="Price"
-                                                value={inputs.target1}
-                                                onChange={(e) => handleInputChange('target1', e.target.value)}
-                                            />
-                                        </div>
-                                        <div className="w-16 relative">
-                                            <input
-                                                type="number"
-                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-2 pr-5 text-white text-sm text-center focus:outline-none focus:border-emerald-500"
-                                                value={inputs.allocation1}
-                                                onChange={(e) => handleInputChange('allocation1', e.target.value)}
-                                                max={100}
-                                                min={0}
-                                            />
-                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
-                                        </div>
-                                    </div>
-
-                                    {/* T2 */}
-                                    <div className="flex gap-2">
-                                        <div className="flex-1 relative">
-                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-blue-400 text-[10px] font-semibold">T2</span>
-                                            <input
-                                                type="number"
-                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
-                                                placeholder="Price"
-                                                value={inputs.target2}
-                                                onChange={(e) => handleInputChange('target2', e.target.value)}
-                                            />
-                                        </div>
-                                        <div className="w-16 relative">
-                                            <input
-                                                type="number"
-                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-2 pr-5 text-white text-sm text-center focus:outline-none focus:border-emerald-500"
-                                                value={inputs.allocation2}
-                                                onChange={(e) => handleInputChange('allocation2', e.target.value)}
-                                                max={100}
-                                                min={0}
-                                            />
-                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
-                                        </div>
-                                    </div>
-
-                                    {/* T3 */}
-                                    <div className="flex gap-2">
-                                        <div className="flex-1 relative">
-                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-purple-400 text-[10px] font-semibold">T3</span>
-                                            <input
-                                                type="number"
-                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-3 pl-7 text-white text-sm focus:outline-none focus:border-emerald-500"
-                                                placeholder="Price"
-                                                value={inputs.target3}
-                                                onChange={(e) => handleInputChange('target3', e.target.value)}
-                                            />
-                                        </div>
-                                        <div className="w-16 relative">
-                                            <input
-                                                type="number"
-                                                className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md py-2 px-2 pr-5 text-white text-sm text-center focus:outline-none focus:border-emerald-500"
-                                                value={inputs.allocation3}
-                                                onChange={(e) => handleInputChange('allocation3', e.target.value)}
-                                                max={100}
-                                                min={0}
-                                            />
-                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
-                                        </div>
-                                    </div>
-
-                                    {/* Allocation Total Indicator */}
-                                    {(() => {
-                                        const total = (parseFloat(inputs.allocation1) || 0) + (parseFloat(inputs.allocation2) || 0) + (parseFloat(inputs.allocation3) || 0);
-                                        const isValid = total === 100;
-                                        return (
-                                            <div className={`text-[10px] text-right ${isValid ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                                Total: {total}% {!isValid && '(should be 100%)'}
+                                {/* Target Price — 50% */}
+                                <div className="flex-1">
+                                    <div className="flex items-center justify-between mb-1.5 px-1 h-[26px]">
+                                        <label className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: '#6b7280' }}>
+                                            Target <span style={{ opacity: 0.5 }}>(opt)</span>
+                                        </label>
+                                        <div
+                                            className="flex items-center gap-1 cursor-pointer"
+                                            onClick={() => handleInputChange('useMultipleTargets', (!inputs.useMultipleTargets).toString())}
+                                            role="button"
+                                        >
+                                            <span className="text-[9px]" style={{ color: inputs.useMultipleTargets ? '#00FF9D' : '#6b7280' }}>Multi</span>
+                                            <div className="relative w-8 h-4 rounded-full transition-colors" style={{ background: inputs.useMultipleTargets ? '#00FF9D' : '#3A3A3A' }}>
+                                                <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${inputs.useMultipleTargets ? 'left-4' : 'left-0.5'}`} />
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    {!inputs.useMultipleTargets ? (
+                                        <Input
+                                            type="number"
+                                            className="text-right"
+                                            placeholder="50,000"
+                                            value={inputs.targetPrice}
+                                            onChange={(e) => handleInputChange('targetPrice', e.target.value)}
+                                            tabIndex={6}
+                                        />
+                                    ) : (
+                                        <div className="space-y-1.5">
+                                            {[
+                                                { key: 'target1', alloc: 'allocation1', label: 'T1', color: '#00FF9D' },
+                                                { key: 'target2', alloc: 'allocation2', label: 'T2', color: '#60a5fa' },
+                                                { key: 'target3', alloc: 'allocation3', label: 'T3', color: '#c084fc' },
+                                            ].map(({ key, alloc, label, color }) => (
+                                                <div key={key} className="flex gap-1">
+                                                    <div className="flex-1 relative">
+                                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] font-bold" style={{ color }}>{label}</span>
+                                                        <input
+                                                            type="number"
+                                                            className="w-full rounded-md py-1.5 px-3 pl-6 font-mono text-sm text-white outline-none"
+                                                            style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)' }}
+                                                            placeholder="Price"
+                                                            value={inputs[key as keyof CalculatorInputs] as string}
+                                                            onChange={(e) => handleInputChange(key as keyof CalculatorInputs, e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div className="w-11 relative">
+                                                        <input
+                                                            type="number"
+                                                            className="w-full rounded-md py-1.5 px-1 pr-4 font-mono text-xs text-white text-center outline-none"
+                                                            style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)' }}
+                                                            value={inputs[alloc as keyof CalculatorInputs] as string}
+                                                            onChange={(e) => handleInputChange(alloc as keyof CalculatorInputs, e.target.value)}
+                                                            max={100} min={0}
+                                                        />
+                                                        <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-500 text-[9px]">%</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {(() => {
+                                                const total = (parseFloat(inputs.allocation1) || 0) + (parseFloat(inputs.allocation2) || 0) + (parseFloat(inputs.allocation3) || 0);
+                                                const isValid = total === 100;
+                                                return (
+                                                    <div className="text-[9px] text-right" style={{ color: isValid ? '#00FF9D' : '#f59e0b' }}>
+                                                        Total: {total}% {!isValid && '(≠100%)'}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+
+                            {/* Leverage Slider - Hide for Indian Stocks */}
+                            {!(inputs.assetClass === 'stocks' && inputs.stockMarket === 'india') && (
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: '#6b7280' }}>
+                                            Leverage
+                                        </label>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="font-mono font-bold text-sm" style={{ color: '#00FF9D', textShadow: '0 0 10px rgba(0,255,157,0.4)' }}>{inputs.leverage}x</span>
+                                            <div className="group relative cursor-help">
+                                                <svg className="w-3 h-3" style={{ color: '#6b7280' }} fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                                </svg>
+                                                <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0 bottom-full mb-2 w-44 text-[10px] rounded p-2 pointer-events-none z-10 shadow-lg" style={{ background: '#1a1c1e', border: '1px solid rgba(0,255,157,0.1)', color: '#6b7280' }}>
+                                                    Affects Margin only, not Position Size.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {(() => {
+                                        const maxLeverage = inputs.assetClass === 'forex' ? 500 :
+                                            inputs.assetClass === 'stocks' ? 50 : 125;
+
+                                        return (
+                                            <>
+                                                <Slider
+                                                    min="1"
+                                                    max={maxLeverage.toString()}
+                                                    value={inputs.leverage}
+                                                    onChange={(e) => handleInputChange('leverage', e.target.value)}
+                                                    tabIndex={7}
+                                                />
+                                                <div className="flex justify-between text-[9px] font-mono mt-1" style={{ color: 'rgba(155,163,175,0.3)' }}>
+                                                    <span>1x</span>
+                                                    <span>{Math.floor(maxLeverage * 0.25)}x</span>
+                                                    <span>{Math.floor(maxLeverage * 0.5)}x</span>
+                                                    <span>{Math.floor(maxLeverage * 0.75)}x</span>
+                                                    <span>{maxLeverage}x</span>
+                                                </div>
+                                            </>
                                         );
                                     })()}
                                 </div>
                             )}
-                        </div>
 
-                        {/* Leverage Slider - Hide for Indian Stocks */}
-                        {!(inputs.assetClass === 'stocks' && inputs.stockMarket === 'india') && (
-                            <div>
-                                <div className="flex justify-between items-center mb-1">
-                                    <label className="block text-xs md:text-sm text-gray-400">
-                                        Leverage: <span className="text-emerald-500 font-semibold">{inputs.leverage}x</span>
-                                    </label>
-                                    <div className="group relative">
-                                        <svg className="w-3.5 h-3.5 text-gray-500 cursor-help" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                        </svg>
-                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0 bottom-full mb-2 w-48 bg-[#2A2A2A] border border-[#3A3A3A] text-gray-300 text-[10px] rounded p-2 pointer-events-none z-10 shadow-lg">
-                                            Leverage determines your Margin usage. It does NOT affect the calculate Position Size (Lots), which is based on your Risk Amount.
-                                        </div>
+
+                            {/* Fixed Leverage Indicator for Indian Stocks */}
+                            {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && (
+                                <div className="obsidian-chassis p-3 md:p-4 rounded-xl flex flex-col gap-1 border border-white/5" style={{ background: 'rgba(0,0,0,0.3)', boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.5)' }}>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[12px] font-bold uppercase tracking-[0.1em] text-white opacity-80">Leverage (SEBI Fixed)</span>
+                                        <span className="text-[#00FF9D] font-mono font-bold text-sm md:text-base drop-shadow-[0_0_8px_rgba(0,255,157,0.3)]">
+                                            {inputs.indiaTradeMode === 'intraday' ? '5x' : '1x'}
+                                        </span>
                                     </div>
+                                    <p className="text-[10px] text-gray-500 mt-1 font-medium tracking-wide">
+                                        {inputs.indiaTradeMode === 'intraday'
+                                            ? 'Peak margin rules limit intraday leverage to 5x'
+                                            : 'Delivery trades require full payment (no leverage)'}
+                                    </p>
                                 </div>
+                            )}
 
-                                {/* Dynamic Max Leverage based on Asset Class */}
-                                {(() => {
-                                    const maxLeverage = inputs.assetClass === 'forex' ? 500 :
-                                        inputs.assetClass === 'stocks' ? 50 : 125;
-
-                                    return (
-                                        <>
-                                            <input
-                                                type="range"
-                                                min="1"
-                                                max={maxLeverage}
-                                                value={inputs.leverage}
-                                                onChange={(e) => handleInputChange('leverage', e.target.value)}
-                                                className="w-full h-1 bg-[#3A3A3A] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:w-4 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-emerald-500 [&::-webkit-slider-thumb]:rounded-full"
-                                                tabIndex={7}
-                                            />
-                                            <div className="flex justify-between text-[10px] md:text-xs text-gray-600 mt-0.5">
-                                                <span>1x</span>
-                                                <span>{Math.floor(maxLeverage * 0.25)}x</span>
-                                                <span>{Math.floor(maxLeverage * 0.5)}x</span>
-                                                <span>{Math.floor(maxLeverage * 0.75)}x</span>
-                                                <span>{maxLeverage}x</span>
-                                            </div>
-                                        </>
-                                    );
-                                })()}
-                            </div>
-                        )}
-
-                        {/* Fixed Leverage Indicator for Indian Stocks */}
-                        {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && (
-                            <div className="bg-[#0D0D0D] border border-[#3A3A3A] rounded-lg p-3">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-xs md:text-sm text-gray-400">Leverage (SEBI Fixed)</span>
-                                    <span className="text-emerald-500 font-semibold text-sm md:text-base">
-                                        {inputs.indiaTradeMode === 'intraday' ? '5x' : '1x'}
-                                    </span>
-                                </div>
-                                <p className="text-[10px] text-gray-500 mt-1">
-                                    {inputs.indiaTradeMode === 'intraday'
-                                        ? 'Peak margin rules limit intraday leverage to 5x'
-                                        : 'Delivery trades require full payment (no leverage)'}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Fee Settings (Crypto & Futures Only) */}
-                        {(inputs.assetClass === 'crypto' || inputs.assetClass === 'futures') && (
-                            <div className="bg-[#0D0D0D] border border-[#3A3A3A] rounded-lg p-3 space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs md:text-sm text-gray-400 font-medium">Fee Settings</span>
-                                        <div className="group relative">
-                                            <svg className="w-3.5 h-3.5 text-gray-500 cursor-help" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                            </svg>
-                                            <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0 bottom-full mb-2 w-52 bg-[#2A2A2A] border border-[#3A3A3A] text-gray-300 text-[10px] rounded p-2 pointer-events-none z-10 shadow-lg">
-                                                <strong>Maker</strong> = limit order (lower fee). <strong>Taker</strong> = market order (higher fee). Fees are charged on the full position value.
+                            {/* Fee Settings (Crypto & Futures Only) */}
+                            {(inputs.assetClass === 'crypto' || inputs.assetClass === 'futures') && (
+                                <div className="p-3 rounded-xl border border-white/5 space-y-4" style={{ background: 'rgba(0,0,0,0.3)', boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.5)' }}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[12px] font-bold uppercase tracking-[0.1em] text-white opacity-80">Fee Settings</span>
+                                            <div className="group relative">
+                                                <svg className="w-3.5 h-3.5 text-gray-500 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                                </svg>
+                                                <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0 bottom-full mb-2 w-52 text-[10px] rounded p-2 pointer-events-none z-10 shadow-lg" style={{ background: '#1a1c1e', border: '1px solid rgba(0,255,157,0.1)', color: '#6b7280' }}>
+                                                    <strong>Maker</strong> = limit order (lower fee). <strong>Taker</strong> = market order (higher fee). Fees are charged on the full position value.
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <button
-                                        onClick={() => handleInputChange('includeFees', (!inputs.includeFees).toString())}
-                                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${inputs.includeFees ? 'bg-emerald-500' : 'bg-[#3A3A3A]'
-                                            }`}
-                                        role="switch"
-                                        aria-checked={inputs.includeFees}
-                                        aria-label="Include Fees"
-                                    >
-                                        <span
-                                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${inputs.includeFees ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                                        <button
+                                            onClick={() => handleInputChange('includeFees', (!inputs.includeFees).toString())}
+                                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${inputs.includeFees ? 'bg-emerald-500' : 'bg-[#3A3A3A]'
                                                 }`}
-                                        />
-                                    </button>
-                                </div>
+                                            role="switch"
+                                            aria-checked={inputs.includeFees}
+                                            aria-label="Include Fees"
+                                        >
+                                            <span
+                                                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${inputs.includeFees ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                                                    }`}
+                                            />
+                                        </button>
+                                    </div>
 
-                                {/* Fee controls — only visible when includeFees is ON */}
-                                {inputs.includeFees && (
-                                    <>
-                                        {/* Exchange Preset Dropdown */}
-                                        <div>
-                                            <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Exchange</label>
-                                            <select
-                                                className="w-full bg-[#1A1A1A] border border-[#3A3A3A] rounded-md py-2 px-3 text-white text-sm focus:outline-none focus:border-emerald-500 cursor-pointer"
-                                                value={inputs.exchange}
-                                                onChange={(e) => {
-                                                    const name = e.target.value;
-                                                    handleInputChange('exchange', name);
-                                                    const preset = getPreset(name);
-                                                    if (preset) {
-                                                        handleInputChange('makerFeePercent', feeToPercent(preset.makerFee));
-                                                        handleInputChange('takerFeePercent', feeToPercent(preset.takerFee));
-                                                    }
-                                                }}
-                                            >
-                                                {EXCHANGE_PRESETS.map((p) => (
-                                                    <option key={p.name} value={p.name}>{p.name}</option>
-                                                ))}
-                                                <option value="Custom">Custom</option>
-                                            </select>
-                                        </div>
-
-                                        {/* Entry/Exit Order Type Toggles */}
-                                        <div className="grid grid-cols-2 gap-2">
+                                    {/* Fee controls — only visible when includeFees is ON */}
+                                    {inputs.includeFees && (
+                                        <>
+                                            {/* Exchange Preset Dropdown */}
                                             <div>
-                                                <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Entry Order</label>
-                                                <div className="flex rounded-md overflow-hidden border border-[#3A3A3A]">
-                                                    <button
-                                                        onClick={() => handleInputChange('entryOrderType', 'maker')}
-                                                        className={`flex-1 py-1.5 text-xs font-medium transition-colors ${inputs.entryOrderType === 'maker'
-                                                            ? 'bg-emerald-500/15 text-emerald-400 border-r border-emerald-500/30'
-                                                            : 'bg-[#1A1A1A] text-gray-500 border-r border-[#3A3A3A] hover:text-gray-300'
-                                                            }`}
-                                                    >Maker</button>
-                                                    <button
-                                                        onClick={() => handleInputChange('entryOrderType', 'taker')}
-                                                        className={`flex-1 py-1.5 text-xs font-medium transition-colors ${inputs.entryOrderType === 'taker'
-                                                            ? 'bg-amber-500/15 text-amber-400'
-                                                            : 'bg-[#1A1A1A] text-gray-500 hover:text-gray-300'
-                                                            }`}
-                                                    >Taker</button>
+                                                <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>Exchange</label>
+                                                <div className="input-glow-container rounded-lg p-0.5 relative">
+                                                    <select
+                                                        className="w-full bg-transparent border-none py-2 px-3 text-white text-sm focus:outline-none focus:ring-0 cursor-pointer appearance-none"
+                                                        value={inputs.exchange}
+                                                        onChange={(e) => {
+                                                            const name = e.target.value;
+                                                            handleInputChange('exchange', name);
+                                                            const preset = getPreset(name);
+                                                            if (preset) {
+                                                                handleInputChange('makerFeePercent', feeToPercent(preset.makerFee));
+                                                                handleInputChange('takerFeePercent', feeToPercent(preset.takerFee));
+                                                            }
+                                                        }}
+                                                    >
+                                                        {EXCHANGE_PRESETS.map((p) => (
+                                                            <option key={p.name} value={p.name} className="bg-[#1A1A1A]">{p.name}</option>
+                                                        ))}
+                                                        <option value="Custom" className="bg-[#1A1A1A]">Custom</option>
+                                                    </select>
+                                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
+                                                        ▼
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div>
-                                                <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Exit Order</label>
-                                                <div className="flex rounded-md overflow-hidden border border-[#3A3A3A]">
-                                                    <button
-                                                        onClick={() => handleInputChange('exitOrderType', 'maker')}
-                                                        className={`flex-1 py-1.5 text-xs font-medium transition-colors ${inputs.exitOrderType === 'maker'
-                                                            ? 'bg-emerald-500/15 text-emerald-400 border-r border-emerald-500/30'
-                                                            : 'bg-[#1A1A1A] text-gray-500 border-r border-[#3A3A3A] hover:text-gray-300'
-                                                            }`}
-                                                    >Maker</button>
-                                                    <button
-                                                        onClick={() => handleInputChange('exitOrderType', 'taker')}
-                                                        className={`flex-1 py-1.5 text-xs font-medium transition-colors ${inputs.exitOrderType === 'taker'
-                                                            ? 'bg-amber-500/15 text-amber-400'
-                                                            : 'bg-[#1A1A1A] text-gray-500 hover:text-gray-300'
-                                                            }`}
-                                                    >Taker</button>
+
+                                            {/* Entry/Exit Order Type Toggles */}
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>Entry Order</label>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => handleInputChange('entryOrderType', 'maker')}
+                                                            className={`market-plate flex-1 py-1.5 px-2 rounded text-[10px] font-bold uppercase tracking-wider flex items-center justify-center transition-colors ${inputs.entryOrderType === 'maker' ? 'active shadow-[0_0_10px_rgba(0,255,157,0.2)] text-[#00FF9D]' : 'text-[#4b5563]'}`}
+                                                        >Maker</button>
+                                                        <button
+                                                            onClick={() => handleInputChange('entryOrderType', 'taker')}
+                                                            className={`market-plate flex-1 py-1.5 px-2 rounded text-[10px] font-bold uppercase tracking-wider flex items-center justify-center transition-colors ${inputs.entryOrderType === 'taker' ? 'active shadow-[0_0_10px_rgba(245,158,11,0.2)] text-amber-500' : 'text-[#4b5563]'}`}
+                                                        >Taker</button>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>Exit Order</label>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => handleInputChange('exitOrderType', 'maker')}
+                                                            className={`market-plate flex-1 py-1.5 px-2 rounded text-[10px] font-bold uppercase tracking-wider flex items-center justify-center transition-colors ${inputs.exitOrderType === 'maker' ? 'active shadow-[0_0_10px_rgba(0,255,157,0.2)] text-[#00FF9D]' : 'text-[#4b5563]'}`}
+                                                        >Maker</button>
+                                                        <button
+                                                            onClick={() => handleInputChange('exitOrderType', 'taker')}
+                                                            className={`market-plate flex-1 py-1.5 px-2 rounded text-[10px] font-bold uppercase tracking-wider flex items-center justify-center transition-colors ${inputs.exitOrderType === 'taker' ? 'active shadow-[0_0_10px_rgba(245,158,11,0.2)] text-amber-500' : 'text-[#4b5563]'}`}
+                                                        >Taker</button>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        {/* Maker/Taker Fee Inputs */}
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <div>
-                                                <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Maker Fee %</label>
-                                                <div className="relative">
-                                                    <input
+                                            {/* Maker/Taker Fee Inputs */}
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>Maker Fee</label>
+                                                    <Input
                                                         type="number"
                                                         step="0.001"
-                                                        className={`w-full bg-[#1A1A1A] border border-[#3A3A3A] rounded-md py-1.5 px-3 pr-6 text-white text-sm focus:outline-none focus:border-emerald-500 ${inputs.exchange !== 'Custom' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                                        className={`text-right ${inputs.exchange !== 'Custom' ? 'opacity-60 cursor-not-allowed' : ''}`}
                                                         value={inputs.makerFeePercent}
                                                         onChange={(e) => handleInputChange('makerFeePercent', e.target.value)}
                                                         readOnly={inputs.exchange !== 'Custom'}
+                                                        suffixNode={<span className="font-mono text-base" style={{ color: 'rgba(0,255,157,0.25)' }}>%</span>}
                                                     />
-                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
                                                 </div>
-                                            </div>
-                                            <div>
-                                                <label className="block text-[10px] md:text-xs text-gray-500 mb-1">Taker Fee %</label>
-                                                <div className="relative">
-                                                    <input
+                                                <div>
+                                                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>Taker Fee</label>
+                                                    <Input
                                                         type="number"
                                                         step="0.001"
-                                                        className={`w-full bg-[#1A1A1A] border border-[#3A3A3A] rounded-md py-1.5 px-3 pr-6 text-white text-sm focus:outline-none focus:border-emerald-500 ${inputs.exchange !== 'Custom' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                                        className={`text-right ${inputs.exchange !== 'Custom' ? 'opacity-60 cursor-not-allowed' : ''}`}
                                                         value={inputs.takerFeePercent}
                                                         onChange={(e) => handleInputChange('takerFeePercent', e.target.value)}
                                                         readOnly={inputs.exchange !== 'Custom'}
+                                                        suffixNode={<span className="font-mono text-base" style={{ color: 'rgba(245,158,11,0.25)' }}>%</span>}
                                                     />
-                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
 
-                        {/* Lot Size Input (Futures Only) */}
-                        {inputs.assetClass === 'futures' && (
-                            <div>
-                                <label className="block text-xs md:text-sm text-gray-400 mb-1">Lot Size</label>
-                                <div className="relative">
-                                    <input
+                            {/* Lot Size Input (Futures Only) */}
+                            {inputs.assetClass === 'futures' && (
+                                <div>
+                                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>
+                                        Lot Size
+                                    </label>
+                                    <Input
                                         type="number"
-                                        className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 text-white text-sm focus:outline-none focus:border-emerald-500"
                                         placeholder="50"
                                         value={inputs.lotSize}
                                         onChange={(e) => handleInputChange('lotSize', e.target.value)}
                                         tabIndex={8}
                                     />
                                 </div>
-                            </div>
-                        )}
+                            )}
 
-                        {/* Forex Pair Selector */}
-                        {inputs.assetClass === 'forex' && (
-                            <div className="space-y-3">
-                                <div>
-                                    <label className="block text-xs md:text-sm text-gray-400 mb-1">
+                            {/* Forex Pair Selector */}
+                            {inputs.assetClass === 'forex' && (
+                                <div className="space-y-1.5 mt-2">
+                                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>
                                         Currency Pair
                                     </label>
-                                    <select
-                                        className="w-full bg-[#0D0D0D] border border-[#3A3A3A] rounded-md md:rounded-lg py-2 md:py-2.5 px-3 text-white text-sm focus:outline-none focus:border-emerald-500 cursor-pointer"
-                                        value={inputs.forexPair}
-                                        onChange={(e) => handleInputChange('forexPair', e.target.value)}
-                                        tabIndex={8}
-                                    >
-                                        <optgroup label="Major Pairs">
-                                            {Object.values(FOREX_PAIRS).filter(p => p.category === 'major').map((pair) => (
-                                                <option key={pair.symbol} value={pair.symbol}>{pair.displayName}</option>
-                                            ))}
-                                        </optgroup>
-                                        <optgroup label="Minor Pairs">
-                                            {Object.values(FOREX_PAIRS).filter(p => p.category === 'minor').map((pair) => (
-                                                <option key={pair.symbol} value={pair.symbol}>{pair.displayName}</option>
-                                            ))}
-                                        </optgroup>
-                                        <optgroup label="Commodities">
-                                            {Object.values(FOREX_PAIRS).filter(p => p.category === 'commodity').map((pair) => (
-                                                <option key={pair.symbol} value={pair.symbol}>{pair.displayName}</option>
-                                            ))}
-                                        </optgroup>
-                                    </select>
+                                    <div className="input-glow-container rounded-lg p-0.5 relative">
+                                        <select
+                                            className="w-full bg-transparent border-none py-2 px-3 text-white text-sm focus:outline-none focus:ring-0 cursor-pointer appearance-none"
+                                            value={inputs.forexPair}
+                                            onChange={(e) => handleInputChange('forexPair', e.target.value)}
+                                            tabIndex={8}
+                                        >
+                                            <optgroup label="Major Pairs" className="bg-[#111111] text-gray-500 font-semibold">
+                                                {Object.values(FOREX_PAIRS).filter(p => p.category === 'major').map((pair) => (
+                                                    <option key={pair.symbol} value={pair.symbol} className="bg-[#1A1A1A] text-[#e5e7eb] font-normal">{pair.displayName}</option>
+                                                ))}
+                                            </optgroup>
+                                            <optgroup label="Minor Pairs" className="bg-[#111111] text-gray-500 font-semibold">
+                                                {Object.values(FOREX_PAIRS).filter(p => p.category === 'minor').map((pair) => (
+                                                    <option key={pair.symbol} value={pair.symbol} className="bg-[#1A1A1A] text-[#e5e7eb] font-normal">{pair.displayName}</option>
+                                                ))}
+                                            </optgroup>
+                                            <optgroup label="Commodities" className="bg-[#111111] text-gray-500 font-semibold">
+                                                {Object.values(FOREX_PAIRS).filter(p => p.category === 'commodity').map((pair) => (
+                                                    <option key={pair.symbol} value={pair.symbol} className="bg-[#1A1A1A] text-[#e5e7eb] font-normal">{pair.displayName}</option>
+                                                ))}
+                                            </optgroup>
+                                        </select>
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
+                                            ▼
+                                        </div>
+                                    </div>
                                     {FOREX_PAIRS[inputs.forexPair] && (
-                                        <div className="text-[10px] text-gray-600 mt-1 flex justify-between">
+                                        <div className="text-[10px] text-gray-600 mt-1 flex justify-between px-1">
                                             <span>Pip Size: {FOREX_PAIRS[inputs.forexPair].pipSize}</span>
                                             <span>Contract: {FOREX_PAIRS[inputs.forexPair].contractSize.toLocaleString('en-US')} units</span>
                                         </div>
                                     )}
                                 </div>
-                            </div>
-                        )}
+                            )}
 
-                        {/* Validation Error */}
-                        {outputs.validationError && (
-                            <div className="bg-red-500/10 border border-red-500/30 rounded-md p-2 text-red-400 text-xs flex items-center gap-2">
-                                <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                                </svg>
-                                {outputs.validationError}
-                            </div>
-                        )}
-
-                        {/* Reset Button */}
-                        <button
-                            onClick={handleReset}
-                            className="w-full py-2 md:py-2.5 px-3 bg-transparent border border-[#3A3A3A] rounded-md md:rounded-lg text-gray-400 text-xs md:text-sm font-medium hover:border-gray-500 hover:text-white transition-colors"
-                            tabIndex={9}
-                        >
-                            Reset
-                        </button>
-                    </div>
-                </div>
-
-                {/* RIGHT: Results Card - First on mobile, Second on desktop */}
-                <div className="order-1 md:order-2 bg-[#1A1A1A] border border-[#2A2A2A] rounded-lg md:rounded-xl overflow-hidden">
-                    {/* Green Gradient Header */}
-                    <div className="px-3 md:px-4 py-2 md:py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 text-sm md:text-base font-semibold text-white text-center">
-                        Results & Analysis
-                    </div>
-
-                    {/* Hero: Position Size */}
-                    <div className="text-center py-4 md:py-5 px-3">
-                        {outputs.futuresMinRisk || outputs.forexMinRisk ? (
-                            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                                <div className="text-red-400 text-sm font-semibold mb-1">Insufficient Risk</div>
-                                <div className="text-xs text-red-300">
-                                    To trade 0.01 Lot, you must risk at least <span className="font-bold">{formatCurrency(outputs.futuresMinRisk || outputs.forexMinRisk || 0)}</span>.
-                                    <br />
-                                    Increase your Risk % or widen your Stop Loss.
-                                </div>
-                            </div>
-                        ) : !outputs.isComplete ? (
-                            // Incomplete input state - H1 feedback
-                            <div className="py-2">
-                                <div className="text-xs md:text-sm text-gray-500 mb-1">Position Size</div>
-                                <div className="font-mono">
-                                    <span className="text-2xl md:text-3xl font-bold text-gray-600">—</span>
-                                    <span className="text-sm md:text-base text-gray-600 ml-1.5">
-                                        {inputs.assetClass === 'stocks' ? 'Shares' :
-                                            inputs.assetClass === 'forex' ? 'Lots' : 'Units'}
-                                    </span>
-                                </div>
-                                <div className="text-xs text-gray-500 mt-2 bg-[#0D0D0D] rounded-md py-2 px-3 inline-block">
-                                    💡 Enter balance, entry & stop loss to calculate
-                                </div>
-                            </div>
-                        ) : (
-                            <>
-                                <div className="text-xs md:text-sm text-gray-400 mb-1">Position Size</div>
-                                <div className="font-mono">
-                                    <span className="text-2xl md:text-3xl font-bold text-emerald-500">
-                                        {formatNumber(outputs.positionSizeUnits,
-                                            inputs.assetClass === 'crypto' ? 4 :
-                                                inputs.assetClass === 'stocks' ? 0 : 2
-                                        )}
-                                    </span>
-                                    <span className="text-sm md:text-base text-gray-400 ml-1.5">
-                                        {inputs.assetClass === 'stocks' ? 'Shares' :
-                                            inputs.assetClass === 'forex' ? 'Lots' : 'Units'}
-                                    </span>
-                                </div>
-                                <div className="text-xs text-gray-500 mt-1">
-                                    {formatCurrency(outputs.positionSizeValue)} total value
-                                </div>
-                                {/* Pip Value Display for Forex */}
-                                {inputs.assetClass === 'forex' && outputs.pipValue && (
-                                    <div className="text-xs text-emerald-400 mt-1">
-                                        1 pip = {formatCurrency(outputs.pipValue)}
-                                    </div>
-                                )}
-                                {/* Margin Limited Warning for Indian Stocks */}
-                                {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && outputs.marginLimited && (
-                                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-md py-2 px-3 mt-2 text-left">
-                                        <div className="text-amber-400 text-[10px] md:text-xs flex items-center gap-1">
-                                            <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                                            </svg>
-                                            <span>Margin Limited</span>
-                                        </div>
-                                        <p className="text-[10px] text-amber-300/70 mt-1">
-                                            Risk suggests {formatNumber(outputs.riskBasedQty, 0)} shares, but margin limits you to {formatNumber(outputs.maxMarginQty, 0)}.
-                                        </p>
-                                    </div>
-                                )}
-                            </>
-                        )}
-                    </div>
-
-                    {/* Result Rows */}
-                    <div className="border-t border-[#2A2A2A]">
-                        {/* Margin Required */}
-                        <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
-                            <span className="text-xs md:text-sm text-gray-400">Margin Required</span>
-                            <span className={`font-mono text-sm md:text-base font-semibold ${!outputs.isComplete ? 'text-gray-600' :
-                                outputs.insufficientMargin ? 'text-red-500' : 'text-white'
-                                }`}>
-                                {outputs.isComplete ? formatCurrency(outputs.marginRequired) : '—'}
-                            </span>
-                        </div>
-
-                        {outputs.insufficientMargin && (
-                            <div className="px-3 md:px-4 py-1.5 bg-red-500/10 border-b border-[#2A2A2A]">
-                                <span className="text-red-400 text-[10px] md:text-xs flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            {/* Validation Error */}
+                            {outputs.validationError && (
+                                <div className="bg-red-500/10 border border-red-500/30 rounded-md p-2 text-red-400 text-xs flex items-center gap-2">
+                                    <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                                     </svg>
-                                    Need {formatCurrency(outputs.marginRequired - parseFloat(inputs.balance))} more
-                                </span>
-                            </div>
-                        )}
+                                    {outputs.validationError}
+                                </div>
+                            )}
 
-                        {/* Risk Amount */}
-                        <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
-                            <span className="text-xs md:text-sm text-gray-400">Risk Amount</span>
-                            <span className={`font-mono text-sm md:text-base font-semibold ${outputs.isComplete ? 'text-red-500' : 'text-gray-600'
-                                }`}>
-                                {outputs.isComplete ? formatCurrency(outputs.riskAmount) : '—'}
-                            </span>
+                            {/* Reset Button */}
+                            <Button
+                                variant="structural"
+                                onClick={handleReset}
+                                className="w-full text-gray-400 hover:text-white py-2"
+                                tabIndex={9}
+                            >
+                                Reset
+                            </Button>
                         </div>
+                    </div>
+                </Card >
 
-                        {/* Fee Breakdown (Crypto & Futures) */}
-                        {outputs.isComplete && outputs.totalFee > 0 && (
-                            <>
-                                <div className="flex justify-between items-center px-3 md:px-4 py-1.5 border-b border-[#2A2A2A] bg-[#0D0D0D]">
-                                    <span className="text-[10px] md:text-xs text-gray-500">Entry Fee ({inputs.entryOrderType})</span>
-                                    <span className="font-mono text-xs md:text-sm text-gray-400">
-                                        {formatCurrency(outputs.entryFee)}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-center px-3 md:px-4 py-1.5 border-b border-[#2A2A2A] bg-[#0D0D0D]">
-                                    <span className="text-[10px] md:text-xs text-gray-500">Exit Fee ({inputs.exitOrderType})</span>
-                                    <span className="font-mono text-xs md:text-sm text-gray-400">
-                                        {formatCurrency(outputs.exitFee)}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-center px-3 md:px-4 py-2 border-b border-[#2A2A2A]">
-                                    <span className="text-xs md:text-sm text-amber-400 font-medium">Total Round-trip Fee</span>
-                                    <span className="font-mono text-sm md:text-base font-semibold text-amber-400">
-                                        {formatCurrency(outputs.totalFee)}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
-                                    <span className="text-xs md:text-sm text-red-400 font-medium">Real Risk (incl. fees)</span>
-                                    <span className="font-mono text-sm md:text-base font-semibold text-red-400">
-                                        {formatCurrency(outputs.realRisk)}
-                                    </span>
-                                </div>
-                                {outputs.breakEvenPrice > 0 && (
-                                    <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
-                                        <span className="text-xs md:text-sm text-gray-400">Break-even Price</span>
-                                        <span className="font-mono text-sm md:text-base font-semibold text-blue-400">
-                                            {formatCurrency(outputs.breakEvenPrice)}
-                                        </span>
+                {/* RIGHT: Results Card — obsidian chassis + glass grid */}
+                < Card chamfered={true} className="order-1 md:order-2 rounded-[2rem] p-1 overflow-hidden flex flex-col" >
+                    {/* Neon Header bar */}
+                    < div className="text-black font-bold uppercase tracking-[0.4em] text-[10px] text-center py-3 rounded-t-[28px]" style={{ background: '#00FF9D', fontFamily: "'Space Grotesk', sans-serif" }
+                    }>
+                        Real - time Analytics
+                    </div >
+                    {/* Glass grid body */}
+                    < GlassPanel className="flex-1 flex flex-col" >
+
+                        {/* Hero: Position Size */}
+                        < div className="text-center py-4 md:py-5 px-3" >
+                            {
+                                outputs.futuresMinRisk || outputs.forexMinRisk ? (
+                                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                                        <div className="text-red-400 text-sm font-semibold mb-1">Insufficient Risk</div>
+                                        <div className="text-xs text-red-300">
+                                            To trade 0.01 Lot, you must risk at least <span className="font-bold">{formatCurrency(outputs.futuresMinRisk || outputs.forexMinRisk || 0)}</span>.
+                                            <br />
+                                            Increase your Risk % or widen your Stop Loss.
+                                        </div>
                                     </div>
-                                )}
-                            </>
-                        )}
-
-                        {/* Potential Profit */}
-                        <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
-                            <span className="text-xs md:text-sm text-gray-400">
-                                {outputs.totalFee > 0 ? 'Adjusted Profit' : 'Potential Profit'}
-                            </span>
-                            <span className={`font-mono text-sm md:text-base font-semibold ${outputs.adjustedProfit > 0 ? 'text-emerald-500' : outputs.adjustedProfit < 0 ? 'text-red-500' : 'text-gray-600'
-                                }`}>
-                                {outputs.potentialProfit !== 0 || outputs.adjustedProfit !== 0
-                                    ? formatCurrency(outputs.totalFee > 0 ? outputs.adjustedProfit : outputs.potentialProfit)
-                                    : '—'}
-                            </span>
-                        </div>
-
-                        {/* Risk:Reward Ratio */}
-                        <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3">
-                            <span className="text-xs md:text-sm text-gray-400">
-                                {outputs.totalFee > 0 ? 'Adjusted R:R' : 'Risk:Reward Ratio'}
-                            </span>
-                            <span className={`font-mono text-sm md:text-base font-semibold ${(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr) >= 1 ? 'text-emerald-500' : 'text-gray-500'}`}>
-                                {(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr) > 0
-                                    ? `1:${formatNumber(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr, 1)}`
-                                    : '—'}
-                            </span>
-                        </div>
-
-                        {/* Helper text for RRR when target not entered but other fields are complete */}
-                        {outputs.isComplete && !inputs.targetPrice && !inputs.useMultipleTargets && (
-                            <div className="px-3 md:px-4 py-2 bg-[#0D0D0D] border-t border-[#2A2A2A]">
-                                <span className="text-gray-500 text-[10px] md:text-xs">
-                                    💡 Enter Target Price to see Risk:Reward ratio
-                                </span>
-                            </div>
-                        )}
-
-                        {/* Staged Exit Summary (Multiple Targets) */}
-                        {inputs.useMultipleTargets && outputs.stagedExits.length > 0 && outputs.isComplete && (
-                            <div className="border-t border-[#2A2A2A]">
-                                <div className="px-3 md:px-4 py-2 bg-[#0D0D0D]">
-                                    <div className="text-xs md:text-sm text-gray-400 font-medium mb-2 flex items-center gap-1.5">
-                                        <span>🎯</span>
-                                        <span>Staged Exit Summary</span>
-                                    </div>
-
-                                    {/* Target Breakdown */}
-                                    <div className="space-y-1.5 text-[10px] md:text-xs">
-                                        {outputs.stagedExits.map((exit, index) => {
-                                            const colors = ['text-emerald-400', 'text-blue-400', 'text-purple-400'];
-                                            const labels = ['T1', 'T2', 'T3'];
-                                            return (
-                                                <div key={index} className="flex justify-between items-center text-gray-400">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`font-semibold ${colors[index]}`}>{labels[index]}</span>
-                                                        <span className="text-gray-500">
-                                                            {formatCurrency(exit.target)} × {exit.quantity} ({exit.allocation}%)
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={exit.profit > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                                                            {formatCurrency(exit.profit)}
-                                                        </span>
-                                                        <span className="text-gray-600 text-[9px]">
-                                                            1:{exit.rrr.toFixed(1)}R
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-
-                                        {/* Total Staged Profit */}
-                                        <div className="flex justify-between text-gray-300 font-medium pt-1.5 border-t border-[#2A2A2A] mt-1.5">
-                                            <span>Total Staged Profit</span>
-                                            <span className={outputs.totalStagedProfit > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                                                {formatCurrency(outputs.totalStagedProfit)}
+                                ) : !outputs.isComplete ? (
+                                    // Incomplete input state - H1 feedback
+                                    <div className="py-2">
+                                        <div className="text-xs md:text-sm text-gray-500 mb-1">Position Size</div>
+                                        <div className="font-mono">
+                                            <span className="text-2xl md:text-3xl font-bold text-gray-600">—</span>
+                                            <span className="text-sm md:text-base text-gray-600 ml-1.5">
+                                                {inputs.assetClass === 'stocks' ? 'Shares' :
+                                                    inputs.assetClass === 'forex' ? 'Lots' : 'Units'}
                                             </span>
                                         </div>
+                                        <div className="text-xs text-gray-500 mt-2 bg-[#0D0D0D] rounded-md py-2 px-3 inline-block">
+                                            💡 Enter balance, entry & stop loss to calculate
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Indian Stocks - Estimated Charges Section */}
-                        {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && outputs.indiaCharges && outputs.isComplete && (
-                            <div className="border-t border-[#2A2A2A]">
-                                <div className="px-3 md:px-4 py-2 bg-[#0D0D0D]">
-                                    <div className="text-xs md:text-sm text-gray-400 font-medium mb-2 flex items-center gap-1.5">
-                                        <span>📊</span>
-                                        <span>Estimated Charges (India)</span>
-                                    </div>
-
-                                    {/* Charge Breakdown */}
-                                    <div className="space-y-1 text-[10px] md:text-xs">
-                                        <div className="flex justify-between text-gray-500">
-                                            <span>STT</span>
-                                            <span>₹{outputs.indiaCharges.stt.toFixed(2)}</span>
+                                ) : (
+                                    <>
+                                        <div className="text-xs md:text-sm text-gray-400 mb-1">Position Size</div>
+                                        <div className="font-mono">
+                                            <span className="text-2xl md:text-3xl font-bold text-emerald-500">
+                                                {formatNumber(outputs.positionSizeUnits,
+                                                    inputs.assetClass === 'crypto' ? 4 :
+                                                        inputs.assetClass === 'stocks' ? 0 : 2
+                                                )}
+                                            </span>
+                                            <span className="text-sm md:text-base text-gray-400 ml-1.5">
+                                                {inputs.assetClass === 'stocks' ? 'Shares' :
+                                                    inputs.assetClass === 'forex' ? 'Lots' : 'Units'}
+                                            </span>
                                         </div>
-                                        <div className="flex justify-between text-gray-500">
-                                            <span>Exchange + SEBI</span>
-                                            <span>₹{(outputs.indiaCharges.exchangeCharges + outputs.indiaCharges.sebiTurnover).toFixed(2)}</span>
+                                        <div className="text-xs text-gray-500 mt-1">
+                                            {formatCurrency(outputs.positionSizeValue)} total value
                                         </div>
-                                        <div className="flex justify-between text-gray-500">
-                                            <span>Stamp Duty</span>
-                                            <span>₹{outputs.indiaCharges.stampDuty.toFixed(2)}</span>
-                                        </div>
-                                        <div className="flex justify-between text-gray-500">
-                                            <span>Brokerage</span>
-                                            <span>₹{outputs.indiaCharges.brokerage.toFixed(2)}</span>
-                                        </div>
-                                        <div className="flex justify-between text-gray-500">
-                                            <span>GST (18%)</span>
-                                            <span>₹{outputs.indiaCharges.gst.toFixed(2)}</span>
-                                        </div>
-
-                                        {/* Total */}
-                                        <div className="flex justify-between text-gray-300 font-medium pt-1 border-t border-[#2A2A2A] mt-1">
-                                            <span>Total Charges</span>
-                                            <span className="text-amber-400">₹{outputs.indiaCharges.totalCharges.toFixed(2)}</span>
-                                        </div>
-
-                                        {/* Breakeven */}
-                                        <div className="flex justify-between text-gray-500">
-                                            <span>Breakeven Movement</span>
-                                            <span>₹{outputs.indiaCharges.breakeven.toFixed(2)}/share</span>
-                                        </div>
-
-                                        {/* STCG Tax Provision */}
-                                        {outputs.potentialProfit > 0 && outputs.indiaCharges.stcgProvision > 0 && (
-                                            <div className="flex justify-between text-gray-500 pt-1 border-t border-[#2A2A2A] mt-1">
-                                                <span>STCG Tax ({inputs.indiaTradeMode === 'intraday' ? '15%' : '20%'})</span>
-                                                <span className="text-red-400">₹{outputs.indiaCharges.stcgProvision.toFixed(2)}</span>
+                                        {/* Pip Value Display for Forex */}
+                                        {inputs.assetClass === 'forex' && outputs.pipValue && (
+                                            <div className="text-xs text-emerald-400 mt-1">
+                                                1 pip = {formatCurrency(outputs.pipValue)}
                                             </div>
                                         )}
+                                        {/* Margin Limited Warning for Indian Stocks */}
+                                        {inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && outputs.marginLimited && (
+                                            <div className="bg-amber-500/10 border border-amber-500/30 rounded-md py-2 px-3 mt-2 text-left">
+                                                <div className="text-amber-400 text-[10px] md:text-xs flex items-center gap-1">
+                                                    <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Margin Limited</span>
+                                                </div>
+                                                <p className="text-[10px] text-amber-300/70 mt-1">
+                                                    Risk suggests {formatNumber(outputs.riskBasedQty, 0)} shares, but margin limits you to {formatNumber(outputs.maxMarginQty, 0)}.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </>
+                                )
+                            }
+                        </div >
 
-                                        {/* Final Net Profit After Tax */}
-                                        {outputs.potentialProfit > 0 && (
-                                            <div className="flex justify-between text-gray-300 font-medium pt-1 border-t border-[#2A2A2A] mt-1">
-                                                <span>🏦 Net Profit (After Tax)</span>
-                                                <span className={outputs.indiaCharges.netProfitAfterTax > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                                                    ₹{outputs.indiaCharges.netProfitAfterTax.toFixed(2)}
+                        {/* Result Rows */}
+                        < div className="border-t border-[#2A2A2A]" >
+                            {/* Margin Required */}
+                            < div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]" >
+                                <span className="text-xs md:text-sm text-gray-400">Margin Required</span>
+                                <span className={`font-mono text-sm md:text-base font-semibold ${!outputs.isComplete ? 'text-gray-600' :
+                                    outputs.insufficientMargin ? 'text-red-500' : 'text-white'
+                                    }`}>
+                                    {outputs.isComplete ? formatCurrency(outputs.marginRequired) : '—'}
+                                </span>
+                            </div >
+
+                            {
+                                outputs.insufficientMargin && (
+                                    <div className="px-3 md:px-4 py-1.5 bg-red-500/10 border-b border-[#2A2A2A]">
+                                        <span className="text-red-400 text-[10px] md:text-xs flex items-center gap-1">
+                                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                            </svg>
+                                            Need {formatCurrency(outputs.marginRequired - parseFloat(inputs.balance))} more
+                                        </span>
+                                    </div>
+                                )
+                            }
+
+                            {/* Risk Amount */}
+                            <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
+                                <span className="text-xs md:text-sm text-gray-400">Risk Amount</span>
+                                <span className={`font-mono text-sm md:text-base font-semibold ${outputs.isComplete ? 'text-red-500' : 'text-gray-600'
+                                    }`}>
+                                    {outputs.isComplete ? formatCurrency(outputs.riskAmount) : '—'}
+                                </span>
+                            </div>
+
+                            {/* Fee Breakdown (Crypto & Futures) */}
+                            {
+                                outputs.isComplete && outputs.totalFee > 0 && (
+                                    <>
+                                        <div className="flex justify-between items-center px-3 md:px-4 py-1.5 border-b border-[#2A2A2A] bg-[#0D0D0D]">
+                                            <span className="text-[10px] md:text-xs text-gray-500">Entry Fee ({inputs.entryOrderType})</span>
+                                            <span className="font-mono text-xs md:text-sm text-gray-400">
+                                                {formatCurrency(outputs.entryFee)}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center px-3 md:px-4 py-1.5 border-b border-[#2A2A2A] bg-[#0D0D0D]">
+                                            <span className="text-[10px] md:text-xs text-gray-500">Exit Fee ({inputs.exitOrderType})</span>
+                                            <span className="font-mono text-xs md:text-sm text-gray-400">
+                                                {formatCurrency(outputs.exitFee)}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center px-3 md:px-4 py-2 border-b border-[#2A2A2A]">
+                                            <span className="text-xs md:text-sm text-amber-400 font-medium">Total Round-trip Fee</span>
+                                            <span className="font-mono text-sm md:text-base font-semibold text-amber-400">
+                                                {formatCurrency(outputs.totalFee)}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
+                                            <span className="text-xs md:text-sm text-red-400 font-medium">Real Risk (incl. fees)</span>
+                                            <span className="font-mono text-sm md:text-base font-semibold text-red-400">
+                                                {formatCurrency(outputs.realRisk)}
+                                            </span>
+                                        </div>
+                                        {outputs.breakEvenPrice > 0 && (
+                                            <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
+                                                <span className="text-xs md:text-sm text-gray-400">Break-even Price</span>
+                                                <span className="font-mono text-sm md:text-base font-semibold text-blue-400">
+                                                    {formatCurrency(outputs.breakEvenPrice)}
                                                 </span>
                                             </div>
                                         )}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                                    </>
+                                )
+                            }
 
-                    {/* Formula */}
-                    <div className="px-3 py-2 text-center text-[10px] md:text-xs text-gray-600 border-t border-[#2A2A2A]">
-                        Position Size = (Balance × Risk%) ÷ |Entry - SL|
+                            {/* Potential Profit */}
+                            <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3 border-b border-[#2A2A2A]">
+                                <span className="text-xs md:text-sm text-gray-400">
+                                    {outputs.totalFee > 0 ? 'Adjusted Profit' : 'Potential Profit'}
+                                </span>
+                                <span className={`font-mono text-sm md:text-base font-semibold ${outputs.adjustedProfit > 0 ? 'text-emerald-500' : outputs.adjustedProfit < 0 ? 'text-red-500' : 'text-gray-600'
+                                    }`}>
+                                    {outputs.potentialProfit !== 0 || outputs.adjustedProfit !== 0
+                                        ? formatCurrency(outputs.totalFee > 0 ? outputs.adjustedProfit : outputs.potentialProfit)
+                                        : '—'}
+                                </span>
+                            </div>
+
+                            {/* Risk:Reward Ratio */}
+                            <div className="flex justify-between items-center px-3 md:px-4 py-2.5 md:py-3">
+                                <span className="text-xs md:text-sm text-gray-400">
+                                    {outputs.totalFee > 0 ? 'Adjusted R:R' : 'Risk:Reward Ratio'}
+                                </span>
+                                <span className={`font-mono text-sm md:text-base font-semibold ${(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr) >= 1 ? 'text-emerald-500' : 'text-gray-500'}`}>
+                                    {(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr) > 0
+                                        ? `1:${formatNumber(outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr, 1)}`
+                                        : '—'}
+                                </span>
+                            </div>
+
+                            {/* Helper text for RRR when target not entered but other fields are complete */}
+                            {
+                                outputs.isComplete && !inputs.targetPrice && !inputs.useMultipleTargets && (
+                                    <div className="px-3 md:px-4 py-2 bg-[#0D0D0D] border-t border-[#2A2A2A]">
+                                        <span className="text-gray-500 text-[10px] md:text-xs">
+                                            💡 Enter Target Price to see Risk:Reward ratio
+                                        </span>
+                                    </div>
+                                )
+                            }
+
+                            {/* Staged Exit Summary (Multiple Targets) */}
+                            {
+                                inputs.useMultipleTargets && outputs.stagedExits.length > 0 && outputs.isComplete && (
+                                    <div className="border-t border-[#2A2A2A]">
+                                        <div className="px-3 md:px-4 py-2 bg-[#0D0D0D]">
+                                            <div className="text-xs md:text-sm text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+                                                <span>🎯</span>
+                                                <span>Staged Exit Summary</span>
+                                            </div>
+
+                                            {/* Target Breakdown */}
+                                            <div className="space-y-1.5 text-[10px] md:text-xs">
+                                                {outputs.stagedExits.map((exit, index) => {
+                                                    const colors = ['text-emerald-400', 'text-blue-400', 'text-purple-400'];
+                                                    const labels = ['T1', 'T2', 'T3'];
+                                                    return (
+                                                        <div key={index} className="flex justify-between items-center text-gray-400">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`font-semibold ${colors[index]}`}>{labels[index]}</span>
+                                                                <span className="text-gray-500">
+                                                                    {formatCurrency(exit.target)} × {exit.quantity} ({exit.allocation}%)
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={exit.profit > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                                                    {formatCurrency(exit.profit)}
+                                                                </span>
+                                                                <span className="text-gray-600 text-[9px]">
+                                                                    1:{exit.rrr.toFixed(1)}R
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+
+                                                {/* Total Staged Profit */}
+                                                <div className="flex justify-between text-gray-300 font-medium pt-1.5 border-t border-[#2A2A2A] mt-1.5">
+                                                    <span>Total Staged Profit</span>
+                                                    <span className={outputs.totalStagedProfit > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                                        {formatCurrency(outputs.totalStagedProfit)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            }
+
+                            {/* Indian Stocks - Estimated Charges Section */}
+                            {
+                                inputs.assetClass === 'stocks' && inputs.stockMarket === 'india' && outputs.indiaCharges && outputs.isComplete && (
+                                    <div className="border-t border-[#2A2A2A]">
+                                        <div className="px-3 md:px-4 py-2 bg-[#0D0D0D]">
+                                            <div className="text-xs md:text-sm text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+                                                <span>📊</span>
+                                                <span>Estimated Charges (India)</span>
+                                            </div>
+
+                                            {/* Charge Breakdown */}
+                                            <div className="space-y-1 text-[10px] md:text-xs">
+                                                <div className="flex justify-between text-gray-500">
+                                                    <span>STT</span>
+                                                    <span>₹{outputs.indiaCharges.stt.toFixed(2)}</span>
+                                                </div>
+                                                <div className="flex justify-between text-gray-500">
+                                                    <span>Exchange + SEBI</span>
+                                                    <span>₹{(outputs.indiaCharges.exchangeCharges + outputs.indiaCharges.sebiTurnover).toFixed(2)}</span>
+                                                </div>
+                                                <div className="flex justify-between text-gray-500">
+                                                    <span>Stamp Duty</span>
+                                                    <span>₹{outputs.indiaCharges.stampDuty.toFixed(2)}</span>
+                                                </div>
+                                                <div className="flex justify-between text-gray-500">
+                                                    <span>Brokerage</span>
+                                                    <span>₹{outputs.indiaCharges.brokerage.toFixed(2)}</span>
+                                                </div>
+                                                <div className="flex justify-between text-gray-500">
+                                                    <span>GST (18%)</span>
+                                                    <span>₹{outputs.indiaCharges.gst.toFixed(2)}</span>
+                                                </div>
+
+                                                {/* Total */}
+                                                <div className="flex justify-between text-gray-300 font-medium pt-1 border-t border-[#2A2A2A] mt-1">
+                                                    <span>Total Charges</span>
+                                                    <span className="text-amber-400">₹{outputs.indiaCharges.totalCharges.toFixed(2)}</span>
+                                                </div>
+
+                                                {/* Breakeven */}
+                                                <div className="flex justify-between text-gray-500">
+                                                    <span>Breakeven Movement</span>
+                                                    <span>₹{outputs.indiaCharges.breakeven.toFixed(2)}/share</span>
+                                                </div>
+
+                                                {/* STCG Tax Provision */}
+                                                {outputs.potentialProfit > 0 && outputs.indiaCharges.stcgProvision > 0 && (
+                                                    <div className="flex justify-between text-gray-500 pt-1 border-t border-[#2A2A2A] mt-1">
+                                                        <span>STCG Tax ({inputs.indiaTradeMode === 'intraday' ? '15%' : '20%'})</span>
+                                                        <span className="text-red-400">₹{outputs.indiaCharges.stcgProvision.toFixed(2)}</span>
+                                                    </div>
+                                                )}
+
+                                                {/* Final Net Profit After Tax */}
+                                                {outputs.potentialProfit > 0 && (
+                                                    <div className="flex justify-between text-gray-300 font-medium pt-1 border-t border-[#2A2A2A] mt-1">
+                                                        <span>🏦 Net Profit (After Tax)</span>
+                                                        <span className={outputs.indiaCharges.netProfitAfterTax > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                                            ₹{outputs.indiaCharges.netProfitAfterTax.toFixed(2)}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            }
+                        </div >
+
+                        {/* Share Setup Button */}
+                        {
+                            outputs.isComplete && (
+                                <div className="p-4 border-t border-[#2A2A2A] bg-[#0D0D0D] flex flex-col items-center">
+                                    <Button
+                                        variant="structural"
+                                        onClick={handleShareImage}
+                                        disabled={isSharing}
+                                        className={`w-full flex items-center justify-center gap-2 py-3 md:py-4 ${isSharing ? 'opacity-50 cursor-not-allowed text-gray-500 bg-transparent' : 'text-[#00FF9D] hover:bg-[#00FF9D]/10 border-[#00FF9D]/30 transition-all bg-[#00FF9D]/5'}`}
+                                        style={!isSharing ? { boxShadow: '0 0 15px rgba(0,255,157,0.05)' } : undefined}
+                                    >
+                                        {isSharing ? (
+                                            <span className="animate-spin w-5 h-5 border-2 border-[#00FF9D] border-t-transparent rounded-full" />
+                                        ) : (
+                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            </svg>
+                                        )}
+                                        <span className="font-bold tracking-widest uppercase text-xs md:text-sm">{isSharing ? 'Capturing...' : 'Export Setup Image'}</span>
+                                    </Button>
+                                </div>
+                            )
+                        }
+
+                        {/* Formula footer */}
+                        <div className="px-4 py-3 text-center border-t border-white/5" style={{ background: '#0a0b0c' }}>
+                            <span className="text-[8px] font-mono tracking-[0.2em] opacity-30" style={{ color: '#9ca3af' }}>
+                                Position Size = (Balance × Risk%) ÷ |Entry − SL|
+                            </span>
+                        </div>
+                    </GlassPanel > {/* end glass-panel-grid */}
+
+                    {/* Bottom bar with grip lines */}
+                    <div className="h-7 border-t border-white/5 flex items-center justify-center gap-8 rounded-b-[28px]" style={{ background: '#0a0b0c' }}>
+                        <div className="w-14 h-0.5 rounded-full" style={{ background: 'rgba(0,0,0,0.5)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.05)' }} />
+                        <div className="w-14 h-0.5 rounded-full" style={{ background: 'rgba(0,0,0,0.5)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.05)' }} />
+                        <div className="w-14 h-0.5 rounded-full" style={{ background: 'rgba(0,0,0,0.5)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.05)' }} />
                     </div>
-                </div>
-            </div>
+                </Card >
+            </div >
 
             {/* Undo Toast */}
-            {showUndoToast && (
-                <div
-                    className={`fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-[#1A1A1A] border border-[#3A3A3A] rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 z-50 ${toastExiting ? 'toast-exit' : 'toast-enter'}`}
-                >
-                    <span className="text-sm text-gray-300">Form reset</span>
-                    <button
-                        onClick={handleUndo}
-                        className="text-sm font-medium text-emerald-500 hover:text-emerald-400 transition-colors"
+            {
+                showUndoToast && (
+                    <div
+                        className={`fixed bottom-4 left-1/2 transform -translate-x-1/2 border rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 z-50 ${toastExiting ? 'toast-exit' : 'toast-enter'}`}
+                        style={{ background: '#121417', borderColor: 'rgba(255,255,255,0.08)' }}
                     >
-                        Undo
-                    </button>
-                    <button
-                        onClick={() => {
-                            setToastExiting(true);
-                            setTimeout(() => {
-                                setShowUndoToast(false);
-                                setPreviousInputs(null);
-                                setToastExiting(false);
-                            }, 300);
-                        }}
-                        className="text-gray-500 hover:text-gray-400 transition-colors ml-1"
-                        aria-label="Dismiss"
-                    >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                    </button>
-                </div>
-            )}
-        </div>
+                        <span className="text-sm text-gray-300">Form reset</span>
+                        <button
+                            onClick={handleUndo}
+                            className="text-sm font-medium hover:opacity-80 transition-opacity"
+                            style={{ color: '#00FF9D' }}
+                        >
+                            Undo
+                        </button>
+                        <button
+                            onClick={() => {
+                                setToastExiting(true);
+                                setTimeout(() => {
+                                    setShowUndoToast(false);
+                                    setPreviousInputs(null);
+                                    setToastExiting(false);
+                                }, 300);
+                            }}
+                            className="text-gray-500 hover:text-gray-400 transition-colors ml-1"
+                            aria-label="Dismiss"
+                        >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                )
+            }
+
+            {/* Hidden Share Card for Image Generation */}
+            {
+                outputs.isComplete && (
+                    <ShareCard
+                        ref={shareCardRef}
+                        assetName={inputs.assetClass === 'forex' ? inputs.forexPair : inputs.assetClass.toUpperCase()}
+                        direction={outputs.tradeDirection}
+                        leverage={inputs.leverage}
+                        pnlPercent={outputs.marginRequired > 0 ? ((outputs.totalFee > 0 ? outputs.adjustedProfit : outputs.potentialProfit) / outputs.marginRequired * 100) : 0}
+                        pnlValue={outputs.totalFee > 0 ? outputs.adjustedProfit : outputs.potentialProfit}
+                        entryPrice={inputs.entryPrice}
+                        targetPrice={inputs.targetPrice}
+                        stopLossPrice={inputs.assetClass === 'forex' && inputs.stopLossMode === 'pips' ? inputs.stopLossPips + ' pips' : inputs.stopLossPrice}
+                        rrr={outputs.totalFee > 0 ? outputs.adjustedRRR : outputs.rrr}
+                        locale={locale}
+                    />
+                )
+            }
+        </div >
     );
 }

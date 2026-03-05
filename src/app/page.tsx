@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState } from "react";
 import Calculator from "@/components/Calculator";
 import { LocaleSelector } from "@/components/LocaleSelector";
@@ -90,7 +92,7 @@ export default function Home() {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Forex Card */}
-            <a
+            <Link
               href="/forex"
               className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-5 hover:border-emerald-500/50 transition-all group block"
             >
@@ -106,10 +108,10 @@ export default function Home() {
               <div className="mt-3 text-xs text-emerald-500 group-hover:underline">
                 Explore all pairs →
               </div>
-            </a>
+            </Link>
 
             {/* Crypto Card */}
-            <a
+            <Link
               href="/crypto"
               className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-5 hover:border-emerald-500/50 transition-all group block"
             >
@@ -125,7 +127,7 @@ export default function Home() {
               <div className="mt-3 text-xs text-emerald-500 group-hover:underline">
                 Explore all coins →
               </div>
-            </a>
+            </Link>
           </div>
         </div>
 

@@ -30,7 +30,7 @@ export function ImageUploader({ onUpload }: ImageUploaderProps) {
 
             const data = await res.json();
             onUpload(data.markdown, data.url);
-        } catch (error) {
+        } catch {
             alert("Upload failed");
         } finally {
             setUploading(false);

@@ -13,7 +13,7 @@ export function LocaleSelector({ onLocaleChange }: LocaleSelectorProps) {
     useEffect(() => {
         const saved = getSavedLocale();
         const initial = saved || detectLocale();
-        setLocale(initial);
+        setTimeout(() => setLocale(initial), 0);
         onLocaleChange(initial);
     }, [onLocaleChange]);
 

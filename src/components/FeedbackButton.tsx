@@ -46,7 +46,7 @@ export function FeedbackButton() {
             } else {
                 setStatus({ type: 'error', message: data.error || 'Failed to send feedback' });
             }
-        } catch (error) {
+        } catch {
             setStatus({ type: 'error', message: 'Network error. Please try again.' });
         } finally {
             setLoading(false);
@@ -86,7 +86,7 @@ export function FeedbackButton() {
 
                         {/* Description */}
                         <p className="text-sm text-gray-400 mb-6">
-                            We'd love to hear your thoughts, suggestions, or any issues you've encountered.
+                            We&apos;d love to hear your thoughts, suggestions, or any issues you&apos;ve encountered.
                         </p>
 
                         {/* Form */}
