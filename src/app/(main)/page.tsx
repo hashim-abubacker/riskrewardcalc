@@ -1,14 +1,7 @@
-"use client";
-
 import Link from "next/link";
-
-import { useState } from "react";
-import Calculator from "@/components/Calculator";
-import { LocaleSelector } from "@/components/LocaleSelector";
 import { FAQAccordion } from "@/components/FAQAccordion";
-import { FeedbackButton } from "@/components/FeedbackButton";
+import { HomeClient } from "@/components/HomeClient";
 import { generateOrganizationSchema, generateWebApplicationSchema } from "@/lib/structured-data";
-import { SupportedLocale } from "@/lib/formatters";
 
 const HOMEPAGE_FAQS = [
   {
@@ -30,7 +23,6 @@ const HOMEPAGE_FAQS = [
 ];
 
 export default function Home() {
-  const [locale, setLocale] = useState<SupportedLocale>('en-US');
   const organizationSchema = generateOrganizationSchema();
   const webAppSchema = generateWebApplicationSchema();
 
@@ -64,14 +56,8 @@ export default function Home() {
 
       <div className="min-h-screen py-4">
         {/* Main Home Layout */}
-        {/* Locale Selector & Feedback Button */}
-        <div className="max-w-[1000px] mx-auto px-3 mb-4 flex justify-end gap-2">
-          <FeedbackButton />
-          <LocaleSelector onLocaleChange={setLocale} />
-        </div>
-
-        {/* Calculator */}
-        <Calculator locale={locale} />
+        {/* Main Client Content */}
+        <HomeClient />
 
         {/* SEO Content Block */}
         <div className="max-w-[1000px] mx-auto px-3 mt-8 md:mt-12">

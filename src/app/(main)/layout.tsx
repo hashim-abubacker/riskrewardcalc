@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import "../globals.css";
 import { Header } from "@/components/Header";
@@ -14,6 +14,20 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-mono",
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -68,13 +82,6 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
-        {/* Google Fonts — Space Grotesk + JetBrains Mono */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap"
-          rel="stylesheet"
-        />
         {/* Critical CSS to prevent flash of unstyled content */}
         <style dangerouslySetInnerHTML={{
           __html: `
@@ -92,7 +99,7 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#09090B] text-[#ededed]`}
+        className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased bg-[#09090B] text-[#ededed]`}
       >
         <div className="min-h-screen flex flex-col">
           {/* Header */}
@@ -106,7 +113,7 @@ export default function RootLayout({
           {/* Footer */}
           <footer className="border-t border-[#27272A] px-4 py-8 text-center text-sm text-[#71717A]">
             <div className="flex flex-col items-center gap-4">
-              <p>© {new Date().getFullYear()} RiskRewardCalc V2. Trade smart, manage risk.</p>
+              <p>© {new Date().getFullYear()} RiskRewardCalc V2.1. Trade smart, manage risk.</p>
 
               <a
                 href="https://github.com/hashim-abubacker/riskrewardcalc"

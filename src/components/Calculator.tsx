@@ -7,6 +7,7 @@ import { MarketPlate } from '@/components/ui/MarketPlate';
 import { Slider } from '@/components/ui/Slider';
 import { Button } from '@/components/ui/Button';
 import { ShareCard } from '@/components/ShareCard';
+import { CopyButton } from '@/components/ui/CopyButton';
 import html2canvas from 'html2canvas';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { formatCurrency as intlFormatCurrency, formatNumber as intlFormatNumber, getCurrencySymbol, SupportedLocale } from '@/lib/formatters';
@@ -845,7 +846,6 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                     value={inputs.balance}
                                     onChange={(e) => handleInputChange('balance', e.target.value)}
                                     onBlur={() => handleBlur('balance')}
-                                    tabIndex={1}
                                     prefixNode={<span className="font-mono text-lg" style={{ color: 'rgba(0,255,157,0.25)' }}>{currencySymbol}</span>}
                                     hasError={!!outputs.fieldErrors.balance}
                                 />
@@ -881,7 +881,6 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                             e.target.value
                                         )}
                                         onBlur={() => handleBlur(inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat')}
-                                        tabIndex={2}
                                         suffixNode={<span className="font-mono text-base" style={{ color: 'rgba(0,255,157,0.25)' }}>{inputs.riskMode === 'percent' ? '%' : currencySymbol}</span>}
                                         hasError={!!outputs.fieldErrors[inputs.riskMode === 'percent' ? 'riskPercent' : 'riskFiat']}
                                     />
@@ -907,8 +906,8 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                         value={inputs.entryPrice}
                                         onChange={(e) => handleInputChange('entryPrice', e.target.value)}
                                         onBlur={() => handleBlur('entryPrice')}
-                                        tabIndex={4}
                                         prefixNode={<span className="font-mono text-base" style={{ color: 'rgba(0,255,157,0.25)' }}>{currencySymbol}</span>}
+                                        suffixNode={inputs.entryPrice ? <CopyButton valueToCopy={inputs.entryPrice} className="ml-1" /> : undefined}
                                         hasError={!!outputs.fieldErrors.entryPrice}
                                     />
                                     {renderFieldError('entryPrice')}
@@ -948,8 +947,8 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                             value={inputs.stopLossPrice}
                                             onChange={(e) => handleInputChange('stopLossPrice', e.target.value)}
                                             onBlur={() => handleBlur('stopLossPrice')}
-                                            tabIndex={5}
                                             containerClassName="border-red-500/10 shadow-[inset_0_0_15px_rgba(239,68,68,0.04)]"
+                                            suffixNode={inputs.stopLossPrice ? <CopyButton valueToCopy={inputs.stopLossPrice} className="ml-1" /> : undefined}
                                             hasError={!!outputs.fieldErrors.stopLossPrice}
                                         />
                                     ) : (
@@ -960,8 +959,8 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                             value={inputs.stopLossPips}
                                             onChange={(e) => handleInputChange('stopLossPips', e.target.value)}
                                             onBlur={() => handleBlur('stopLossPips')}
-                                            tabIndex={5}
                                             containerClassName="border-red-500/10 shadow-[inset_0_0_15px_rgba(239,68,68,0.04)]"
+                                            suffixNode={inputs.stopLossPips ? <CopyButton valueToCopy={inputs.stopLossPips} className="ml-1" /> : undefined}
                                         />
                                     )}
                                     {renderFieldError('stopLossPrice')}
@@ -992,7 +991,7 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                             placeholder="50,000"
                                             value={inputs.targetPrice}
                                             onChange={(e) => handleInputChange('targetPrice', e.target.value)}
-                                            tabIndex={6}
+                                            suffixNode={inputs.targetPrice ? <CopyButton valueToCopy={inputs.targetPrice} className="ml-1" /> : undefined}
                                         />
                                     ) : (
                                         <div className="space-y-1.5">
@@ -1068,11 +1067,11 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                         return (
                                             <>
                                                 <Slider
+                                                    aria-label="Leverage"
                                                     min="1"
                                                     max={maxLeverage.toString()}
                                                     value={inputs.leverage}
                                                     onChange={(e) => handleInputChange('leverage', e.target.value)}
-                                                    tabIndex={7}
                                                 />
                                                 <div className="flex justify-between text-[9px] font-mono mt-1" style={{ color: 'rgba(155,163,175,0.3)' }}>
                                                     <span>1x</span>
@@ -1140,9 +1139,10 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                         <>
                                             {/* Exchange Preset Dropdown */}
                                             <div>
-                                                <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>Exchange</label>
+                                                <label htmlFor="exchange-select" className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>Exchange</label>
                                                 <div className="input-glow-container rounded-lg p-0.5 relative">
                                                     <select
+                                                        id="exchange-select"
                                                         className="w-full bg-transparent border-none py-2 px-3 text-white text-sm focus:outline-none focus:ring-0 cursor-pointer appearance-none"
                                                         value={inputs.exchange}
                                                         onChange={(e) => {
@@ -1239,7 +1239,6 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                         placeholder="50"
                                         value={inputs.lotSize}
                                         onChange={(e) => handleInputChange('lotSize', e.target.value)}
-                                        tabIndex={8}
                                     />
                                 </div>
                             )}
@@ -1247,15 +1246,15 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                             {/* Forex Pair Selector */}
                             {inputs.assetClass === 'forex' && (
                                 <div className="space-y-1.5 mt-2">
-                                    <label className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>
+                                    <label htmlFor="currency-pair-select" className="block text-[10px] font-bold uppercase tracking-[0.15em] mb-1.5 ml-1" style={{ color: '#6b7280' }}>
                                         Currency Pair
                                     </label>
                                     <div className="input-glow-container rounded-lg p-0.5 relative">
                                         <select
+                                            id="currency-pair-select"
                                             className="w-full bg-transparent border-none py-2 px-3 text-white text-sm focus:outline-none focus:ring-0 cursor-pointer appearance-none"
                                             value={inputs.forexPair}
                                             onChange={(e) => handleInputChange('forexPair', e.target.value)}
-                                            tabIndex={8}
                                         >
                                             <optgroup label="Major Pairs" className="bg-[#111111] text-gray-500 font-semibold">
                                                 {Object.values(FOREX_PAIRS).filter(p => p.category === 'major').map((pair) => (
@@ -1301,7 +1300,6 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                 variant="structural"
                                 onClick={handleReset}
                                 className="w-full text-gray-400 hover:text-white py-2"
-                                tabIndex={9}
                             >
                                 Reset
                             </Button>
@@ -1348,7 +1346,10 @@ export default function Calculator({ locale, defaultAssetClass, defaultForexPair
                                     </div>
                                 ) : (
                                     <>
-                                        <div className="text-xs md:text-sm text-gray-400 mb-1">Position Size</div>
+                                        <div className="text-xs md:text-sm text-gray-400 mb-1 flex items-center justify-center gap-1">
+                                            Position Size
+                                            <CopyButton valueToCopy={outputs.positionSizeUnits.toString()} className="opacity-70 hover:opacity-100 -my-1" />
+                                        </div>
                                         <div className="font-mono">
                                             <span className="text-2xl md:text-3xl font-bold text-emerald-500">
                                                 {formatNumber(outputs.positionSizeUnits,
