@@ -12,6 +12,9 @@ export const metadata: Metadata = {
         type: 'website',
         url: 'https://riskrewardcalc.com/crypto',
     },
+    alternates: {
+        canonical: '/crypto',
+    },
 };
 
 export default function CryptoHubPage() {

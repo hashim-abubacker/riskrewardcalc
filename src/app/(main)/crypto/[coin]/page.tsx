@@ -43,6 +43,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
             type: 'website',
             url: `https://riskrewardcalc.com/crypto/${coin}`,
         },
+        alternates: {
+            canonical: `/crypto/${coin}`,
+        },
     };
 }
 

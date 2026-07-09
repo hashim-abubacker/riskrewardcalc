@@ -32,7 +32,7 @@ RiskRewardCalc is a trading calculator that helps Crypto, Forex, and Stock trade
 
 ## URL
 
-https://riskrewardcalc.com
+[RiskRewardCalc](https://riskrewardcalc.com)
 
 ## Contact
 

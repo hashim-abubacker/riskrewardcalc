@@ -4,6 +4,9 @@ import { getAllPosts } from '@/lib/blog';
 export const metadata = {
   title: 'Trading Blog & Education | RiskRewardCalc',
   description: 'Learn about risk management, position sizing, and trading psychology with our educational blog posts.',
+  alternates: {
+    canonical: '/blog',
+  },
 };
 
 export default function BlogIndex() {

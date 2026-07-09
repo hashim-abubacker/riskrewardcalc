@@ -12,6 +12,9 @@ export const metadata: Metadata = {
         type: 'website',
         url: 'https://riskrewardcalc.com/forex',
     },
+    alternates: {
+        canonical: '/forex',
+    },
 };
 
 export default function ForexHubPage() {

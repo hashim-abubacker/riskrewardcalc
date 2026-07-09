@@ -32,7 +32,10 @@ export async function generateMetadata({ params }: BlogPostPageProps): Promise<M
       card: 'summary_large_image',
       title: post.metadata.title,
       description: post.metadata.description,
-    }
+    },
+    alternates: {
+      canonical: `/blog/${resolvedParams.slug}`,
+    },
   };
 }
 

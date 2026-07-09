@@ -44,6 +44,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
             type: 'website',
             url: `https://riskrewardcalc.com/forex/${pair.toLowerCase()}`,
         },
+        alternates: {
+            canonical: `/forex/${pair.toLowerCase()}`,
+        },
     };
 }
 

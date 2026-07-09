@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FAQAccordion } from "@/components/FAQAccordion";
 import { HomeClient } from "@/components/HomeClient";
 import { generateOrganizationSchema, generateWebApplicationSchema } from "@/lib/structured-data";
+import { Metadata } from 'next';
 
 const HOMEPAGE_FAQS = [
   {
@@ -21,6 +22,12 @@ const HOMEPAGE_FAQS = [
     answer: "Yes, RiskRewardCalc is a 100% free PWA. You can install it on your mobile home screen for offline access."
   }
 ];
+
+export const metadata: Metadata = {
+  alternates: {
+    canonical: '/',
+  },
+};
 
 export default function Home() {
   const organizationSchema = generateOrganizationSchema();
