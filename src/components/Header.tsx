@@ -21,6 +21,7 @@ export function Header() {
                 {/* Desktop Navigation */}
                 <nav className="hidden md:flex items-center gap-6 text-sm text-[#A1A1AA]">
                     <Link href="/" className="hover:text-white transition-colors">Calculator</Link>
+                    <Link href="/blog" className="hover:text-white transition-colors">Blog</Link>
                     <Link href="/#faq" className="hover:text-white transition-colors">FAQ</Link>
                     <FeedbackButton />
                 </nav>
@@ -47,6 +48,13 @@ export function Header() {
                         onClick={() => setIsMenuOpen(false)}
                     >
                         Calculator
+                    </Link>
+                    <Link
+                        href="/blog"
+                        className="px-2 py-2 hover:bg-[#27272A] hover:text-white rounded-md transition-colors"
+                        onClick={() => setIsMenuOpen(false)}
+                    >
+                        Blog
                     </Link>
                     <Link
                         href="/#faq"
